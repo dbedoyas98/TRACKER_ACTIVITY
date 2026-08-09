@@ -271,15 +271,56 @@ const BICI = [
     larga: ["Salida larga · 1 h 45 suave", "Sin series. Disfrutar y cerrar el bloque entero.", 105] },
 ];
 
-function entrenoDe(sem, dia) {
-  const b = BICI[sem - 1], s = SERIES[sem - 1];
-  if (dia === 0) return { tipo: "gym", titulo: GYM.A.nombre, sub: s.s + " · " + s.rpe, lista: GYM.A.ej, min: 55 };
-  if (dia === 1) return { tipo: "bici", titulo: b.z2[0], sub: b.z2[1], lista: [], min: b.z2[2] };
-  if (dia === 2) return { tipo: "gym", titulo: GYM.B.nombre, sub: s.s + " · " + s.rpe, lista: GYM.B.ej, min: 55 };
-  if (dia === 3) return { tipo: "bici", titulo: b.int[0], sub: b.int[1], lista: [], min: b.int[2] };
-  if (dia === 4) return { tipo: "gym", titulo: GYM.C.nombre, sub: s.v + " · descanso corto, respiración controlada", lista: GYM.C.ej, min: 40 };
-  if (dia === 5) return { tipo: "bici", titulo: b.larga[0], sub: b.larga[1], lista: [], min: b.larga[2] };
-  return { tipo: "libre", titulo: "Descanso activo · movilidad y caminata", sub: "20 min de movilidad de cadera y espalda alta + 40 min de caminata. Nada de intensidad.", lista: [], min: 60 };
+/* Días de entrenamiento configurables: plantilla semanal + overrides puntuales.
+   La progresión (reps, RPE, minutos) sigue viniendo del índice de semana. */
+const SESIONES_VALIDAS = ["gymA", "gymB", "gymC", "biciZ2", "biciSeries", "biciLarga", "movilidad", "descanso"];
+const SESION_LABEL = {
+  gymA: "Gimnasio A", gymB: "Gimnasio B", gymC: "Gimnasio C",
+  biciZ2: "Bici Z2", biciSeries: "Bici series", biciLarga: "Salida larga",
+  movilidad: "Movilidad", descanso: "Descanso",
+};
+const DEFAULT_ENTRENO = {
+  plantilla: ["gymA", "biciZ2", "gymB", "biciSeries", "gymC", "biciLarga", "movilidad"],
+  overrides: {},
+};
+const SESIONES = {
+  gymA: (semIdx) => ({ tipo: "gym", titulo: GYM.A.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: GYM.A.ej, min: 55 }),
+  gymB: (semIdx) => ({ tipo: "gym", titulo: GYM.B.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: GYM.B.ej, min: 55 }),
+  gymC: (semIdx) => ({ tipo: "gym", titulo: GYM.C.nombre, sub: SERIES[semIdx].v + " · descanso corto, respiración controlada", lista: GYM.C.ej, min: 40 }),
+  biciZ2: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.z2[0], sub: b.z2[1], lista: [], min: b.z2[2] }; },
+  biciSeries: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.int[0], sub: b.int[1], lista: [], min: b.int[2] }; },
+  biciLarga: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.larga[0], sub: b.larga[1], lista: [], min: b.larga[2] }; },
+  movilidad: () => ({ tipo: "libre", titulo: "Descanso activo · movilidad y caminata", sub: "20 min de movilidad de cadera y espalda alta + 40 min de caminata. Nada de intensidad.", lista: [], min: 60 }),
+  descanso: () => ({ tipo: "descanso", titulo: "Descanso completo", sub: "Sin sesión estructurada. El cuerpo absorbe la carga de los días duros — camina suave si te provoca.", lista: [], min: 0 }),
+};
+
+function entrenoDe(sem, dia, config, fechaISO) {
+  const cfg = config || DEFAULT_ENTRENO;
+  const clave = (fechaISO && cfg.overrides && cfg.overrides[fechaISO]) || cfg.plantilla[dia];
+  const gen = SESIONES[clave] || SESIONES.descanso;
+  return { ...gen(sem - 1), clave };
+}
+
+function fechaDeSemDia(inicioISO, sem, dia) {
+  const d = parseISO(inicioISO); d.setDate(d.getDate() + (sem - 1) * 7 + dia); return iso(d);
+}
+
+/* Avisos, no bloqueos: se calculan sobre la plantilla base, no sobre overrides puntuales. */
+const DURAS = new Set(["gymA", "gymB", "gymC", "biciZ2", "biciSeries", "biciLarga"]);
+function avisosEntreno(plantilla) {
+  const avisos = [];
+  let racha = 0, rachaMax = 0;
+  plantilla.forEach((k) => { racha = DURAS.has(k) ? racha + 1 : 0; rachaMax = Math.max(rachaMax, racha); });
+  if (rachaMax >= 3) avisos.push("Tres o más días duros seguidos, sin descanso ni movilidad entre medio.");
+  for (let i = 0; i < plantilla.length - 1; i++) {
+    if (plantilla[i] === "biciSeries" && plantilla[i + 1] === "biciLarga")
+      avisos.push("La salida larga queda justo después del día de series: el cuerpo llega cargado.");
+  }
+  if (!plantilla.includes("movilidad") && !plantilla.includes("descanso"))
+    avisos.push("Esta semana no tiene ningún día de descanso o movilidad.");
+  if (plantilla.filter((k) => k.startsWith("bici")).length < 2)
+    avisos.push("Menos de dos sesiones de bici en la semana, y el bloque apunta a ciclismo.");
+  return avisos;
 }
 
 const ESTUDIO = [
@@ -410,7 +451,9 @@ const store = (typeof window !== 'undefined' && window.storage) ? window.storage
   set: async (k, v) => { localStorage.setItem(k, v); return { key: k, value: v }; },
 };
 
-const KEY = "fundamento:v1";
+const KEY = "fundamento:v2";
+const KEY_V1 = "fundamento:v1";
+function migrar(v1) { return { ...v1, entreno: v1.entreno || DEFAULT_ENTRENO }; }
 const iso = (d) => d.toISOString().slice(0, 10);
 const hoyISO = () => iso(new Date());
 function parseISO(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
@@ -425,9 +468,9 @@ const PILARES = [
   { k: "mente", n: "Mente", c: "#FF5C8A", d: "Lo que te dices" },
 ];
 
-function tareasDe(sem, dia) {
+function tareasDe(sem, dia, config, fechaISO) {
   const n = NUTRI[sem - 1][dia];
-  const e = entrenoDe(sem, dia);
+  const e = entrenoDe(sem, dia, config, fechaISO);
   const est = ESTUDIO[sem - 1];
   const foco = FOCO_MENTE[sem - 1];
 
@@ -440,11 +483,17 @@ function tareasDe(sem, dia) {
     { id: "m5", t: "Verduras en al menos dos comidas", s: "Ilimitadas y obligatorias. Acompañan, no rellenan." },
     { id: "m6", t: "Cero licor, cero fritos, cero paquetes", s: "Orinar transparente todo el día es la señal de que vas bien de agua." },
   ];
+  // Cena del miércoles de la semana 2: la nota condicional del plan ahora se resuelve contra los minutos reales del día.
+  if (sem === 2 && dia === 2) {
+    mesa[4] = { ...mesa[4], s: n[3] + (e.min >= 90
+      ? " → Hoy entrenas " + e.min + " min (≥90): aplica C completo y sin el ½ G."
+      : " → Hoy entrenas " + e.min + " min (<90): aplica la versión con ½ G y ½ C.") };
+  }
   const ruta = [
     { id: "r0", t: e.titulo, s: e.sub, tag: e.min + " MIN" },
     { id: "r1", t: "Movilidad 10 minutos", s: "Cadera, tobillo y espalda alta. Antes del gym o al terminar el rodaje." },
   ];
-  if (dia === 5 || (dia === 3 && sem === 4)) ruta.push({ id: "r2", t: "Comer antes y durante", s: PRE_ENTRENO[1] + " " + PRE_ENTRENO[2] });
+  if (e.clave === "biciLarga" || e.min >= 90) ruta.push({ id: "r2", t: "Comer antes y durante", s: PRE_ENTRENO[1] + " " + PRE_ENTRENO[2] });
 
   const taller = [
     { id: "t0", t: "Bloque de estudio · 50 minutos", s: dia < 5 ? est.ses[dia] : "Sin sesión nueva: repasa lo que fallaste esta semana o descansa la cabeza." },
@@ -571,9 +620,10 @@ function Radar({ valores }) {
   );
 }
 
-function Carga({ sem, hoyDia }) {
-  const mins = DIAS.map((_, i) => entrenoDe(sem, i).min);
-  const max = Math.max(...mins);
+function Carga({ sem, hoyDia, config, inicio }) {
+  const dias = DIAS.map((_, i) => entrenoDe(sem, i, config, inicio ? fechaDeSemDia(inicio, sem, i) : undefined));
+  const mins = dias.map((d) => d.min);
+  const max = Math.max(...mins, 1);
   const W = 700, H = 120, base = H - 4;
   const bw = W / 7 - 14;
   return (
@@ -583,7 +633,8 @@ function Carga({ sem, hoyDia }) {
         const h = (m / max) * (base - 26);
         const x = i * (W / 7) + 7;
         const act = i === hoyDia;
-        const col = entrenoDe(sem, i).tipo === "gym" ? "#A77BFF" : entrenoDe(sem, i).tipo === "bici" ? "#22E0D6" : "#4D8DFF";
+        const tipo = dias[i].tipo;
+        const col = tipo === "gym" ? "#A77BFF" : tipo === "bici" ? "#22E0D6" : "#4D8DFF";
         return (
           <g key={i}>
             <rect x={x} y={base - h} width={bw} height={h} fill={col} opacity={act ? 0.95 : 0.35} />
@@ -661,9 +712,16 @@ export default function Fundamento() {
     let vivo = true;
     (async () => {
       let cargado = null;
-      try { const r = await store.get(KEY); if (r && r.value) cargado = JSON.parse(r.value); } catch (e) { cargado = null; }
+      try {
+        const r2 = await store.get(KEY);
+        if (r2 && r2.value) cargado = JSON.parse(r2.value);
+        else {
+          const r1 = await store.get(KEY_V1);
+          if (r1 && r1.value) cargado = migrar(JSON.parse(r1.value));
+        }
+      } catch (e) { cargado = null; }
       if (!vivo) return;
-      setState({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [], ...(cargado || {}) });
+      setState({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [], entreno: DEFAULT_ENTRENO, ...(cargado || {}) });
     })();
     return () => { vivo = false; };
   }, []);
@@ -679,7 +737,8 @@ export default function Fundamento() {
   const sem = dentro ? Math.floor(idxDia / 7) + 1 : 1;
   const dia = dentro ? idxDia % 7 : (parseISO(fecha).getDay() + 6) % 7;
 
-  const plan = useMemo(() => tareasDe(sem, dia), [sem, dia]);
+  const entrenoCfg = (state && state.entreno) || DEFAULT_ENTRENO;
+  const plan = useMemo(() => tareasDe(sem, dia, entrenoCfg, fecha), [sem, dia, entrenoCfg, fecha]);
   const dd = (state && state.dias[fecha]) || {};
   const hechos = dd.done || {};
 
@@ -699,13 +758,28 @@ export default function Fundamento() {
   const toggle = (id) => setDia({ done: { ...hechos, [id]: !hechos[id] } });
   const agua = (d) => setDia({ agua: Math.max(0, Math.round(((dd.agua || 0) + d) * 100) / 100) });
 
+  function setEntreno(campos) {
+    if (!state) return;
+    guardar({ ...state, entreno: { ...entrenoCfg, ...campos } });
+  }
+  const setPlantillaDia = (i, val) => {
+    const plantilla = [...entrenoCfg.plantilla]; plantilla[i] = val;
+    setEntreno({ plantilla });
+  };
+  const setOverrideHoy = (val) => {
+    const overrides = { ...(entrenoCfg.overrides || {}) };
+    if (val) overrides[fecha] = val; else delete overrides[fecha];
+    setEntreno({ overrides });
+  };
+
   const serie = useMemo(() => {
     if (!state) return new Array(28).fill(0);
     return new Array(28).fill(0).map((_, i) => {
       const d = parseISO(state.inicio); d.setDate(d.getDate() + i);
-      const reg = state.dias[iso(d)];
+      const fISO = iso(d);
+      const reg = state.dias[fISO];
       if (!reg || !reg.done) return 0;
-      const p = tareasDe(Math.floor(i / 7) + 1, i % 7);
+      const p = tareasDe(Math.floor(i / 7) + 1, i % 7, state.entreno, fISO);
       const tot = PILARES.reduce((a, pi) => a + p[pi.k].length, 0);
       const hh = PILARES.reduce((a, pi) => a + p[pi.k].filter((t) => reg.done[t.id]).length, 0);
       return tot ? hh / tot : 0;
@@ -724,8 +798,9 @@ export default function Fundamento() {
     const tot = {}; PILARES.forEach((p) => (tot[p.k] = 0));
     for (let i = 0; i <= Math.min(idxDia, 27); i++) {
       const d = parseISO(state.inicio); d.setDate(d.getDate() + i);
-      const reg = state.dias[iso(d)];
-      const p = tareasDe(Math.floor(i / 7) + 1, i % 7);
+      const fISO = iso(d);
+      const reg = state.dias[fISO];
+      const p = tareasDe(Math.floor(i / 7) + 1, i % 7, state.entreno, fISO);
       PILARES.forEach((pi) => {
         tot[pi.k] += p[pi.k].length;
         if (reg && reg.done) acc[pi.k] += p[pi.k].filter((t) => reg.done[t.id]).length;
@@ -804,9 +879,18 @@ export default function Fundamento() {
                           <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em>
                             <span>{e[0]} — <span style={{ color: "var(--dim)" }}>{e[1]}</span></span></div>
                         ))}
+                        <span className="lbl">Cambiar solo hoy</span>
+                        <select className="fld" aria-label="Cambiar el entreno solo de hoy" value={(entrenoCfg.overrides || {})[fecha] || ""} onChange={(e) => setOverrideHoy(e.target.value)}>
+                          <option value="">Usar la plantilla ({SESION_LABEL[entrenoCfg.plantilla[dia]]})</option>
+                          {SESIONES_VALIDAS.map((k) => <option key={k} value={k}>{SESION_LABEL[k]}</option>)}
+                        </select>
+                        {(entrenoCfg.overrides || {})[fecha] && (
+                          <div className="note">Esto cambia solo el {fecha}, no la plantilla semanal.</div>
+                        )}
                         <div style={{ marginTop: 10 }}>
-                          <div className="charthead"><b>Carga de la semana · minutos</b><span>{DIAS.reduce((a, _, i) => a + entrenoDe(sem, i).min, 0)} min</span></div>
-                          <Carga sem={sem} hoyDia={dia} />
+                          <div className="charthead"><b>Carga de la semana · minutos</b>
+                            <span>{DIAS.reduce((a, _, i) => a + entrenoDe(sem, i, entrenoCfg, fechaDeSemDia(state.inicio, sem, i)).min, 0)} min</span></div>
+                          <Carga sem={sem} hoyDia={dia} config={entrenoCfg} inicio={state.inicio} />
                         </div>
                       </>
                     )}
@@ -897,8 +981,8 @@ export default function Fundamento() {
       <div className="h3">Carga de entrenamiento</div>
       <div className="pane chartwrap">
         <div className="charthead"><b>Semana {semanaVista} · minutos por día</b>
-          <span>{DIAS.reduce((a, _, i) => a + entrenoDe(semanaVista, i).min, 0)} min</span></div>
-        <Carga sem={semanaVista} hoyDia={semanaVista === sem ? dia : -1} />
+          <span>{DIAS.reduce((a, _, i) => a + entrenoDe(semanaVista, i, entrenoCfg, fechaDeSemDia(state.inicio, semanaVista, i)).min, 0)} min</span></div>
+        <Carga sem={semanaVista} hoyDia={semanaVista === sem ? dia : -1} config={entrenoCfg} inicio={state.inicio} />
       </div>
 
       <div className="h3">Mesa · rutina en ayunas</div>
@@ -916,7 +1000,7 @@ export default function Fundamento() {
 
       <div className="h3">Ruta · sesión por sesión</div>
       {DIAS.map((dn, i) => {
-        const e = entrenoDe(semanaVista, i);
+        const e = entrenoDe(semanaVista, i, entrenoCfg, fechaDeSemDia(state.inicio, semanaVista, i));
         return (
           <div className="pane block" key={i}>
             <h4>{dn} — {e.titulo}</h4>
@@ -1140,6 +1224,25 @@ export default function Fundamento() {
       </div>
 
       <div className="pane block">
+        <h4>Semana de entrenamiento</h4>
+        <p>Qué sesión toca cada día de la semana. La progresión (reps, RPE, minutos) sigue viniendo de la semana del bloque en la que estés.</p>
+        {DIAS.map((dn, i) => (
+          <div key={dn} style={{ marginTop: 10 }}>
+            <span className="lbl">{dn}</span>
+            <select className="fld" aria-label={"Sesión del " + dn} value={entrenoCfg.plantilla[i]} onChange={(e) => setPlantillaDia(i, e.target.value)}>
+              {SESIONES_VALIDAS.map((k) => <option key={k} value={k}>{SESION_LABEL[k]}</option>)}
+            </select>
+          </div>
+        ))}
+        <div style={{ marginTop: 14 }}>
+          <div className="charthead"><b>Carga en vivo · minutos por día</b>
+            <span>{DIAS.reduce((a, _, i) => a + entrenoDe(sem, i, entrenoCfg, fechaDeSemDia(state.inicio, sem, i)).min, 0)} min</span></div>
+          <Carga sem={sem} hoyDia={dia} config={entrenoCfg} inicio={state.inicio} />
+        </div>
+        {avisosEntreno(entrenoCfg.plantilla).map((a, i) => <div className="note" key={i}>{a}</div>)}
+      </div>
+
+      <div className="pane block">
         <h4>Ver otro día</h4>
         <p>Para completar un día que se te pasó o revisar el que viene.</p>
         <input className="fld" type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
@@ -1156,7 +1259,7 @@ export default function Fundamento() {
         }}>Descargar respaldo</button>
         <button className="btn warn" onClick={() => {
           if (confirm("Se borra todo el historial del bloque, incluidos los chequeos. ¿Seguro?"))
-            guardar({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [] });
+            guardar({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [], entreno: DEFAULT_ENTRENO });
         }}>Borrar todo y empezar de nuevo</button>
       </div>
 
