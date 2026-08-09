@@ -2,7 +2,7 @@
    Cachea la app para que abra sin señal. Sube CACHE cuando publiques cambios. */
 const CACHE = "fundamento-v2";
 const ASSETS = [
-  "./", "./index.html", "./app.js", "./manifest.webmanifest",
+  "./", "./index.html", "./app.js", "./register-sw.js", "./manifest.webmanifest",
   "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"
 ];
 

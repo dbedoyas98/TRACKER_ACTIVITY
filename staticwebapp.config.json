@@ -1,0 +1,21 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/*.{js,json,png,webmanifest,ico,map}"]
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
+  },
+  "routes": [
+    { "route": "/sw.js", "headers": { "Cache-Control": "no-cache" } },
+    { "route": "/register-sw.js", "headers": { "Cache-Control": "no-cache" } },
+    { "route": "/index.html", "headers": { "Cache-Control": "no-cache" } },
+    { "route": "/app.*.js", "headers": { "Cache-Control": "public, max-age=31536000, immutable" } },
+    { "route": "/*.png", "headers": { "Cache-Control": "public, max-age=604800" } },
+    { "route": "/manifest.webmanifest", "headers": { "Cache-Control": "public, max-age=86400" } }
+  ],
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; base-uri 'self'; form-action 'self'"
+  }
+}
