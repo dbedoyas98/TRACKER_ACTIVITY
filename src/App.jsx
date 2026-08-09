@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { resolver } from "./comidas.js";
+import { RECETAS } from "./data/recetas.js";
 
 /* ==========================================================================
    FUNDAMENTO · v2
@@ -383,36 +385,96 @@ const FOCO_MENTE = [
   { t: "Semana 4 · integrar", d: "Ya los conoces a los tres. Cuando aparezca uno, lo nombras y respondes desde el Sabio: ¿qué haría alguien que ya resolvió esto?" },
 ];
 
+/* Tabla de porciones del plan: [nombre, categoría, banda 0–300 cals, banda 300–700 cals].
+   Cada banda es { crudo, cocido }. cocido:null cuando el plan no trae equivalencia cocida
+   (frutas y grasas no la traen; algunos alimentos se pesan siempre en crudo). Valores no
+   numéricos (huevos, pan, arepa, tortilla) se muestran tal cual, sin escalar por porción. */
 const PORCIONES = [
-  ["Avena (medir siempre en crudo)", "C", "51", "77"], ["Arroz blanco crudo", "C", "50", "75"],
-  ["Maduro crudo", "C", "107", "159"], ["Papa cruda", "C", "212", "315"],
-  ["Papa amarilla cruda", "C", "147", "218"], ["Pasta cruda", "C", "49", "73"],
-  ["Lentejas crudas", "C", "23", "34"], ["Frijoles crudos", "C", "29", "42"],
-  ["Garbanzo crudo", "C", "28", "42"], ["Quinoa", "C", "50", "74"],
-  ["Batata", "C", "165", "246"], ["Yuca cruda", "C", "90", "134"],
-  ["Arveja cruda", "C", "39", "59"], ["Plátano maduro", "C", "89", "133"],
-  ["Maíz pira", "C", "77", "115"], ["Pan (rodajas 50–90 cals)", "C", "2 de 100 cals", "2½ de 100 cals"],
-  ["Arepa blanca", "C", "1 de 150–200 cals", "1½ de 150 cals"], ["Tortilla de 90–100 cals", "C", "2", "2"],
-  ["Pollo crudo", "P", "163", "204"], ["Cerdo crudo", "P", "172", "215"],
-  ["Res cruda", "P", "148", "185"], ["Salmón crudo", "P", "164", "205"],
-  ["Atún en agua", "P", "158", "197"], ["Tilapia", "P", "161", "202"],
-  ["Corvina", "P", "118", "147"], ["Trucha", "P", "231", "289"],
-  ["Róbalo", "P", "189", "281"], ["Camarones", "P", "131", "164"],
-  ["Pechuga de pavo", "P", "156", "232"], ["Muslo sin hueso", "P", "141", "176"],
-  ["Huevo entero", "P", "3 huevos (máx. 4)", "3 huevos (máx. 4)"],
-  ["Aguacate", "G", "85", "116"], ["Maní", "G", "37", "50"],
-  ["Almendras o mantequilla de almendras", "G", "18", "25"], ["Mantequilla de maní", "G", "30", "42"],
-  ["Aceite de oliva (g o ml)", "G", "20", "27"], ["Aceite de coco", "G", "20", "27"],
-  ["Semillas de chía", "G", "19", "26"], ["Semillas de ajonjolí", "G", "22", "31"],
-  ["Pistachos", "G", "49", "67"], ["Nuez del Brasil", "G", "27", "38"],
-  ["Marañón", "G", "38", "52"], ["Queso finesse (rodaja baja en grasa)", "G", "4", "6"],
-  ["Banano", "F", "150", "223"], ["Fresas", "F", "223", "331"],
-  ["Piña", "F", "271", "403"], ["Papaya", "F", "174", "259"],
-  ["Manzana roja", "F", "177", "263"], ["Manzana verde", "F", "338", "502"],
-  ["Mango", "F", "228", "339"], ["Uvas", "F", "189", "281"],
-  ["Pera", "F", "114", "170"], ["Mandarina", "F", "186", "276"],
-  ["Durazno", "F", "171", "254"], ["Sandía", "F", "228", "339"],
-  ["Melón", "F", "276", "410"], ["Arándanos", "F", "223", "331"], ["Ciruela", "F", "147", "219"],
+  ["Avena (medir siempre en crudo)", "C", { crudo: 51, cocido: null }, { crudo: 77, cocido: null }],
+  ["Arroz blanco crudo", "C", { crudo: 50, cocido: 106 }, { crudo: 75, cocido: 158 }],
+  ["Maduro crudo", "C", { crudo: 107, cocido: 92 }, { crudo: 159, cocido: 144 }],
+  ["Papa cruda", "C", { crudo: 212, cocido: 197 }, { crudo: 315, cocido: 300 }],
+  ["Papa amarilla cruda", "C", { crudo: 147, cocido: 132 }, { crudo: 218, cocido: 203 }],
+  ["Pasta cruda", "C", { crudo: 49, cocido: 103 }, { crudo: 73, cocido: 153 }],
+  ["Lentejas crudas", "C", { crudo: 23, cocido: 69 }, { crudo: 34, cocido: 102 }],
+  ["Frijoles crudos", "C", { crudo: 29, cocido: 86 }, { crudo: 42, cocido: 127 }],
+  ["Garbanzo crudo", "C", { crudo: 28, cocido: 85 }, { crudo: 42, cocido: 126 }],
+  ["Quinoa", "C", { crudo: 50, cocido: 104 }, { crudo: 74, cocido: 155 }],
+  ["Batata", "C", { crudo: 165, cocido: 347 }, { crudo: 246, cocido: 516 }],
+  ["Yuca cruda", "C", { crudo: 90, cocido: 75 }, { crudo: 134, cocido: 119 }],
+  ["Arveja cruda", "C", { crudo: 39, cocido: 118 }, { crudo: 59, cocido: 176 }],
+  ["Plátano maduro", "C", { crudo: 89, cocido: 74 }, { crudo: 133, cocido: 118 }],
+  ["Plátano verde crudo", "C", { crudo: 107, cocido: 107 }, { crudo: 159, cocido: 159 }],
+  ["Maíz pira", "C", { crudo: 77, cocido: 163 }, { crudo: 115, cocido: 242 }],
+  ["Blanquillo", "C", { crudo: 33, cocido: 98 }, { crudo: 48, cocido: 145 }],
+  ["Frijol negro crudo", "C", { crudo: 27, cocido: 82 }, { crudo: 41, cocido: 122 }],
+  ["Pan (rodajas 50–90 cals)", "C", { crudo: "2 de 100 cals o 3 de 70 cals", cocido: null }, { crudo: "2½ de 100 cals o 3 de 70 cals", cocido: null }],
+  ["Arepa blanca", "C", { crudo: "1 de 150 a 200 cals", cocido: null }, { crudo: "1½ de 150 cals", cocido: null }],
+  ["Tortilla de 90–100 cals", "C", { crudo: "2", cocido: null }, { crudo: "2", cocido: null }],
+
+  ["Pollo crudo", "P", { crudo: 163, cocido: 148 }, { crudo: 204, cocido: 189 }],
+  ["Cerdo crudo", "P", { crudo: 172, cocido: 157 }, { crudo: 215, cocido: 200 }],
+  ["Res cruda", "P", { crudo: 148, cocido: 133 }, { crudo: 185, cocido: 170 }],
+  ["Salmón crudo", "P", { crudo: 164, cocido: 149 }, { crudo: 205, cocido: 190 }],
+  ["Atún en agua", "P", { crudo: 158, cocido: 143 }, { crudo: 197, cocido: 182 }],
+  ["Tilapia", "P", { crudo: 161, cocido: 146 }, { crudo: 202, cocido: 187 }],
+  ["Corvina", "P", { crudo: 118, cocido: 103 }, { crudo: 147, cocido: 132 }],
+  ["Trucha", "P", { crudo: 231, cocido: 216 }, { crudo: 289, cocido: 274 }],
+  ["Róbalo", "P", { crudo: 189, cocido: 174 }, { crudo: 281, cocido: 266 }],
+  ["Camarones", "P", { crudo: 131, cocido: 116 }, { crudo: 164, cocido: 149 }],
+  ["Pechuga de pavo", "P", { crudo: 156, cocido: 141 }, { crudo: 232, cocido: 217 }],
+  ["Pavo crudo", "P", { crudo: 162, cocido: 147 }, { crudo: 203, cocido: 188 }],
+  ["Muslo sin hueso", "P", { crudo: 141, cocido: 126 }, { crudo: 176, cocido: 161 }],
+  ["Pulpo", "P", { crudo: 243, cocido: 228 }, { crudo: 304, cocido: 289 }],
+  ["Calamares", "P", { crudo: 233, cocido: 218 }, { crudo: 291, cocido: 276 }],
+  ["Tofu", "P", { crudo: 106, cocido: 91 }, { crudo: 157, cocido: 142 }],
+  ["Sierra", "P", { crudo: 181, cocido: null }, { crudo: 227, cocido: null }],
+  ["Huevo entero", "P", { crudo: "3 huevos (máx. 4)", cocido: null }, { crudo: "3 huevos (máx. 4)", cocido: null }],
+  ["Mezcla de claras y huevo", "P", { crudo: "2 huevos + 2 a 3 claras", cocido: null }, { crudo: "2 huevos + 2 a 3 claras", cocido: null }],
+
+  ["Aguacate", "G", { crudo: 85, cocido: null }, { crudo: 116, cocido: null }],
+  ["Maní", "G", { crudo: 37, cocido: null }, { crudo: 50, cocido: null }],
+  ["Almendras o mantequilla de almendras", "G", { crudo: 18, cocido: null }, { crudo: 25, cocido: null }],
+  ["Mantequilla de maní", "G", { crudo: 30, cocido: null }, { crudo: 42, cocido: null }],
+  ["Aceite de oliva (g o ml)", "G", { crudo: 20, cocido: null }, { crudo: 27, cocido: null }],
+  ["Aceite de coco", "G", { crudo: 20, cocido: null }, { crudo: 27, cocido: null }],
+  ["Coco", "G", { crudo: 50, cocido: null }, { crudo: 50, cocido: null }],
+  ["Semillas de chía", "G", { crudo: 19, cocido: null }, { crudo: 26, cocido: null }],
+  ["Semillas de ajonjolí", "G", { crudo: 22, cocido: null }, { crudo: 31, cocido: null }],
+  ["Pistachos", "G", { crudo: 49, cocido: null }, { crudo: 67, cocido: null }],
+  ["Nuez del Brasil", "G", { crudo: 27, cocido: null }, { crudo: 38, cocido: null }],
+  ["Marañón", "G", { crudo: 38, cocido: null }, { crudo: 52, cocido: null }],
+  ["Queso finesse (rodaja baja en grasa)", "G", { crudo: 4, cocido: null }, { crudo: 6, cocido: null }],
+  ["Cuajada Colanta", "G", { crudo: 64, cocido: null }, { crudo: 87, cocido: null }],
+  ["Chocolate Lok al 58%", "G", { crudo: 47, cocido: null }, { crudo: 64, cocido: null }],
+  ["Queso parmesano Alpina", "G", { crudo: 51, cocido: null }, { crudo: 70, cocido: null }],
+  ["Queso paipa", "G", { crudo: 64, cocido: null }, { crudo: 87, cocido: null }],
+  ["Tocineta Zenú (falta info nutricional del producto)", "G", { crudo: 43, cocido: null }, { crudo: 59, cocido: null }],
+  ["Queso fetta (falta info nutricional del producto)", "G", { crudo: 84, cocido: null }, { crudo: 115, cocido: null }],
+
+  ["Banano", "F", { crudo: 150, cocido: null }, { crudo: 223, cocido: null }],
+  ["Fresas", "F", { crudo: 223, cocido: null }, { crudo: 331, cocido: null }],
+  ["Piña", "F", { crudo: 271, cocido: null }, { crudo: 403, cocido: null }],
+  ["Papaya", "F", { crudo: 174, cocido: null }, { crudo: 259, cocido: null }],
+  ["Kiwi", "F", { crudo: 307, cocido: null }, { crudo: 457, cocido: null }],
+  ["Manzana roja", "F", { crudo: 177, cocido: null }, { crudo: 263, cocido: null }],
+  ["Manzana verde", "F", { crudo: 338, cocido: null }, { crudo: 502, cocido: null }],
+  ["Mango", "F", { crudo: 228, cocido: null }, { crudo: 339, cocido: null }],
+  ["Uvas", "F", { crudo: 189, cocido: null }, { crudo: 281, cocido: null }],
+  ["Chontaduro", "F", { crudo: 82, cocido: null }, { crudo: 122, cocido: null }],
+  ["Pera", "F", { crudo: 114, cocido: null }, { crudo: 170, cocido: null }],
+  ["Mandarina", "F", { crudo: 186, cocido: null }, { crudo: 276, cocido: null }],
+  ["Durazno", "F", { crudo: 171, cocido: null }, { crudo: 254, cocido: null }],
+  ["Sandía", "F", { crudo: 228, cocido: null }, { crudo: 339, cocido: null }],
+  ["Melón", "F", { crudo: 276, cocido: null }, { crudo: 410, cocido: null }],
+  ["Arándanos", "F", { crudo: 223, cocido: null }, { crudo: 331, cocido: null }],
+  ["Ciruela", "F", { crudo: 147, cocido: null }, { crudo: 219, cocido: null }],
+  ["Granadilla", "F", { crudo: 146, cocido: null }, { crudo: 217, cocido: null }],
+  ["Carambolo", "F", { crudo: 255, cocido: null }, { crudo: 380, cocido: null }],
+  ["Guayaba", "F", { crudo: 120, cocido: null }, { crudo: 178, cocido: null }],
+  ["Melocotón fresco (no enlatado)", "F", { crudo: 166, cocido: null }, { crudo: 247, cocido: null }],
+  ["Pitahaya", "F", { crudo: 130, cocido: null }, { crudo: 193, cocido: null }],
+  ["Naranja", "F", { crudo: 128, cocido: null }, { crudo: 191, cocido: null }],
 ];
 
 const SNACKS = [
@@ -443,6 +505,11 @@ const MEDIDAS = [
    UTILIDADES
    ========================================================================== */
 
+function fmtBanda(banda) {
+  if (typeof banda.crudo !== "number") return banda.crudo;
+  return banda.cocido != null ? `${banda.crudo} g · ${banda.cocido} g cocido` : `${banda.crudo} g`;
+}
+
 
 /* Capa de almacenamiento: usa window.storage dentro de Claude,
    y localStorage cuando corre como app instalada. */
@@ -451,9 +518,19 @@ const store = (typeof window !== 'undefined' && window.storage) ? window.storage
   set: async (k, v) => { localStorage.setItem(k, v); return { key: k, value: v }; },
 };
 
-const KEY = "fundamento:v2";
+const KEY = "fundamento:v3";
+const KEY_V2 = "fundamento:v2";
 const KEY_V1 = "fundamento:v1";
-function migrar(v1) { return { ...v1, entreno: v1.entreno || DEFAULT_ENTRENO }; }
+const DEFAULT_PERFIL = {
+  favoritos: { P: [], C: [], G: [], F: [] },
+  excluidos: [],
+  banda: { desayuno: "0-300", almuerzo: "300-700", media: "0-300", cena: "300-700" },
+  pesar: "crudo",
+  rotacion: true,
+  porcionesExtra: [],
+};
+function migrarV1aV2(v1) { return { ...v1, entreno: v1.entreno || DEFAULT_ENTRENO }; }
+function migrarV2aV3(v2) { return { ...v2, perfil: v2.perfil || DEFAULT_PERFIL }; }
 const iso = (d) => d.toISOString().slice(0, 10);
 const hoyISO = () => iso(new Date());
 function parseISO(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
@@ -692,6 +769,81 @@ function Check({ on, onClick, tag, title, sub }) {
   );
 }
 
+const CAT_LABEL = { P: "Proteína", C: "Carbohidrato", G: "Grasa", F: "Fruta" };
+const FACTOR_LABEL = { 0.5: "media porción", 1.5: "porción y media" };
+const MESA_COMIDA = { m1: "desayuno", m2: "almuerzo", m3: "media", m4: "cena" };
+const COMIDAS_KEYS = ["desayuno", "almuerzo", "media", "cena"];
+
+function hashFecha(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h >>> 0;
+}
+
+/* Criterio de selección: slot del día, categoría que el día pide, sin excluidos,
+   no sugerida en los últimos 3 días, desempate determinista por hash de la fecha. */
+function sugerirRecetas(fecha, categoriasDelDia, perfil, diasState) {
+  const excluidos = perfil.excluidos || [];
+  const candidatas = RECETAS.filter((r) =>
+    r.slots.some((s) => COMIDAS_KEYS.includes(s)) &&
+    r.cubre.some((c) => categoriasDelDia.has(c)) &&
+    !r.usa.some((u) => excluidos.includes(u))
+  );
+  const recientes = new Set();
+  for (let i = 1; i <= 3; i++) {
+    const d = parseISO(fecha); d.setDate(d.getDate() - i);
+    const reg = diasState[iso(d)];
+    ((reg && reg.sugeridas) || []).forEach((id) => recientes.add(id));
+  }
+  let pool = candidatas.filter((r) => !recientes.has(r.id));
+  if (pool.length < 2) pool = candidatas;
+  const orden = [...pool].sort((a, b) => a.id.localeCompare(b.id));
+  if (orden.length <= 3) return orden;
+  const start = hashFecha(fecha) % orden.length;
+  const out = [];
+  for (let i = 0; i < 3; i++) out.push(orden[(start + i) % orden.length]);
+  return out;
+}
+
+function ComidaChk({ id, tag, title, on, onToggle, resuelto, abierta, onAbrir, elegido, onElegir }) {
+  return (
+    <div className="chk" data-on={on ? 1 : 0}>
+      <button className="box" aria-pressed={on} aria-label={"Marcar " + title + " como cumplida"} onClick={onToggle}>
+        <svg viewBox="0 0 12 12" fill="none">
+          <path d="M1.5 6.2 4.4 9 10.5 3" stroke="#050B12" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <span className="chk-txt" style={{ flex: 1 }}>
+        <button onClick={onAbrir} aria-expanded={abierta} style={{ display: "block", width: "100%", textAlign: "left" }}>
+          {tag ? <span className="tag">{tag}</span> : null}{title}
+          <span className="chk-sub">{resuelto.original}</span>
+        </button>
+        {abierta && (
+          <div style={{ marginTop: 10 }}>
+            {resuelto.partes.map((parte, i) => parte.tipo === "literal"
+              ? (parte.texto ? <div className="li" key={i}><em>·</em><span>{parte.texto}</span></div> : null)
+              : (
+                <div key={i} style={{ marginTop: 8 }}>
+                  <span className="lbl">{CAT_LABEL[parte.cat]}{FACTOR_LABEL[parte.factor] ? " · " + FACTOR_LABEL[parte.factor] : ""}</span>
+                  <div className="pills" style={{ marginTop: 6 }}>
+                    {parte.opciones.map((op) => (
+                      <button key={op.alimento} className="pill"
+                        data-on={elegido && elegido[parte.cat] === op.alimento ? 1 : 0}
+                        onClick={() => onElegir(parte.cat, op.alimento)}>
+                        {op.alimento}{op.gramos != null ? ` · ${op.gramos} g${op.peso ? " " + op.peso : ""}` : ` · ${op.unidad}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+        )}
+      </span>
+    </div>
+  );
+}
+
 /* ==========================================================================
    APP
    ========================================================================== */
@@ -701,9 +853,14 @@ export default function Fundamento() {
   const [state, setState] = useState(null);
   const [fecha, setFecha] = useState(hoyISO());
   const [abierto, setAbierto] = useState({ mesa: true });
+  const [comidaAbierta, setComidaAbierta] = useState({});
   const [semanaVista, setSemanaVista] = useState(1);
   const [filtro, setFiltro] = useState("C");
   const [busca, setBusca] = useState("");
+  const [filtroPerfil, setFiltroPerfil] = useState("P");
+  const [buscaPerfil, setBuscaPerfil] = useState("");
+  const [recetaAbierta, setRecetaAbierta] = useState(null);
+  const [alimentoNuevo, setAlimentoNuevo] = useState({ nombre: "", cat: "P", crudo0: "", crudo3: "" });
   const [cap, setCap] = useState({ sab: "evitador", que: "", dijo: "", sabio: "" });
   const [chk, setChk] = useState({});
   const [aviso, setAviso] = useState("");
@@ -713,15 +870,19 @@ export default function Fundamento() {
     (async () => {
       let cargado = null;
       try {
-        const r2 = await store.get(KEY);
-        if (r2 && r2.value) cargado = JSON.parse(r2.value);
+        const r3 = await store.get(KEY);
+        if (r3 && r3.value) cargado = JSON.parse(r3.value);
         else {
-          const r1 = await store.get(KEY_V1);
-          if (r1 && r1.value) cargado = migrar(JSON.parse(r1.value));
+          const r2 = await store.get(KEY_V2);
+          if (r2 && r2.value) cargado = migrarV2aV3(JSON.parse(r2.value));
+          else {
+            const r1 = await store.get(KEY_V1);
+            if (r1 && r1.value) cargado = migrarV2aV3(migrarV1aV2(JSON.parse(r1.value)));
+          }
         }
       } catch (e) { cargado = null; }
       if (!vivo) return;
-      setState({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [], entreno: DEFAULT_ENTRENO, ...(cargado || {}) });
+      setState({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [], entreno: DEFAULT_ENTRENO, perfil: DEFAULT_PERFIL, ...(cargado || {}) });
     })();
     return () => { vivo = false; };
   }, []);
@@ -741,6 +902,12 @@ export default function Fundamento() {
   const plan = useMemo(() => tareasDe(sem, dia, entrenoCfg, fecha), [sem, dia, entrenoCfg, fecha]);
   const dd = (state && state.dias[fecha]) || {};
   const hechos = dd.done || {};
+
+  const perfilCfg = (state && state.perfil) || DEFAULT_PERFIL;
+  const porcionesTotal = useMemo(
+    () => PORCIONES.concat((perfilCfg.porcionesExtra || []).map((a) => [a.nombre, a.cat, { crudo: a.gramos0, cocido: null }, { crudo: a.gramos3, cocido: null }])),
+    [perfilCfg.porcionesExtra]
+  );
 
   const valoresHoy = {};
   PILARES.forEach((p) => {
@@ -771,6 +938,59 @@ export default function Fundamento() {
     if (val) overrides[fecha] = val; else delete overrides[fecha];
     setEntreno({ overrides });
   };
+
+  function setPerfil(campos) {
+    if (!state) return;
+    guardar({ ...state, perfil: { ...perfilCfg, ...campos } });
+  }
+  const toggleFavorito = (cat, nombre) => {
+    const actuales = perfilCfg.favoritos[cat] || [];
+    const siguientes = actuales.includes(nombre) ? actuales.filter((n) => n !== nombre) : [...actuales, nombre];
+    setPerfil({ favoritos: { ...perfilCfg.favoritos, [cat]: siguientes } });
+  };
+  const toggleExcluido = (nombre) => {
+    const actuales = perfilCfg.excluidos || [];
+    setPerfil({ excluidos: actuales.includes(nombre) ? actuales.filter((n) => n !== nombre) : [...actuales, nombre] });
+  };
+  const agregarAlimentoExtra = () => {
+    const nombre = alimentoNuevo.nombre.trim();
+    const g0 = parseFloat(alimentoNuevo.crudo0), g3 = parseFloat(alimentoNuevo.crudo3);
+    if (!nombre || Number.isNaN(g0) || Number.isNaN(g3)) return;
+    setPerfil({ porcionesExtra: [...(perfilCfg.porcionesExtra || []), { nombre, cat: alimentoNuevo.cat, gramos0: g0, gramos3: g3 }] });
+    setAlimentoNuevo({ nombre: "", cat: alimentoNuevo.cat, crudo0: "", crudo3: "" });
+  };
+
+  function comidaAyerElegida(comida) {
+    if (!state) return null;
+    const d = parseISO(fecha); d.setDate(d.getDate() - 1);
+    const reg = state.dias[iso(d)];
+    return (reg && reg.elegido && reg.elegido[comida]) || null;
+  }
+  function elegirComida(comida, cat, alimento) {
+    const actual = (dd.elegido && dd.elegido[comida]) || {};
+    const siguiente = actual[cat] === alimento ? { ...actual, [cat]: undefined } : { ...actual, [cat]: alimento };
+    setDia({ elegido: { ...(dd.elegido || {}), [comida]: siguiente } });
+  }
+  function resolverComida(texto, comida) {
+    const ayer = perfilCfg.rotacion ? comidaAyerElegida(comida) : null;
+    const evitar = ayer && ayer.P ? { P: [ayer.P] } : undefined;
+    return resolver(texto, { fecha, comida, perfil: perfilCfg, porciones: porcionesTotal, evitar });
+  }
+
+  const nutriHoy = NUTRI[sem - 1][dia];
+  const categoriasDelDia = new Set();
+  COMIDAS_KEYS.forEach((c, i) => {
+    resolverComida(nutriHoy[i], c).partes.forEach((p) => { if (p.tipo === "porcion") categoriasDelDia.add(p.cat); });
+  });
+  const sugerenciasHoy = state ? sugerirRecetas(fecha, categoriasDelDia, perfilCfg, state.dias) : [];
+
+  useEffect(() => {
+    if (!state || !dentro) return;
+    if (state.dias[fecha] && state.dias[fecha].sugeridas) return;
+    const ids = sugerenciasHoy.map((r) => r.id);
+    if (ids.length) setDia({ sugeridas: ids });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fecha, !!state, dentro]);
 
   const serie = useMemo(() => {
     if (!state) return new Array(28).fill(0);
@@ -860,17 +1080,66 @@ export default function Fundamento() {
                 </button>
                 {abierto[p.k] && (
                   <div className="pbody">
-                    {items.map((t) => <Check key={t.id} on={!!hechos[t.id]} onClick={() => toggle(t.id)} tag={t.tag} title={t.t} sub={t.s} />)}
+                    {items.map((t) => {
+                      const comida = MESA_COMIDA[t.id];
+                      if (!comida) return <Check key={t.id} on={!!hechos[t.id]} onClick={() => toggle(t.id)} tag={t.tag} title={t.t} sub={t.s} />;
+                      return (
+                        <ComidaChk key={t.id} id={t.id} tag={t.tag} title={t.t} on={!!hechos[t.id]}
+                          onToggle={() => toggle(t.id)}
+                          resuelto={resolverComida(t.s, comida)}
+                          abierta={!!comidaAbierta[t.id]}
+                          onAbrir={() => setComidaAbierta({ ...comidaAbierta, [t.id]: !comidaAbierta[t.id] })}
+                          elegido={dd.elegido && dd.elegido[comida]}
+                          onElegir={(cat, alimento) => elegirComida(comida, cat, alimento)} />
+                      );
+                    })}
 
                     {p.k === "mesa" && (
-                      <div className="water">
-                        <button className="wbtn" onClick={() => agua(-0.25)} aria-label="Quitar 250 ml">−</button>
-                        <div className="wtrack">
-                          <div className="wfill" style={{ width: Math.min(100, ((dd.agua || 0) / state.meta) * 100) + "%" }} />
-                          <div className="wlabel">{(dd.agua || 0).toFixed(2)} / {state.meta} L</div>
+                      <>
+                        <div className="water">
+                          <button className="wbtn" onClick={() => agua(-0.25)} aria-label="Quitar 250 ml">−</button>
+                          <div className="wtrack">
+                            <div className="wfill" style={{ width: Math.min(100, ((dd.agua || 0) / state.meta) * 100) + "%" }} />
+                            <div className="wlabel">{(dd.agua || 0).toFixed(2)} / {state.meta} L</div>
+                          </div>
+                          <button className="wbtn" onClick={() => agua(0.25)} aria-label="Sumar 250 ml">+</button>
                         </div>
-                        <button className="wbtn" onClick={() => agua(0.25)} aria-label="Sumar 250 ml">+</button>
-                      </div>
+
+                        <span className="lbl" style={{ marginTop: 18 }}>Qué puedes cocinar hoy</span>
+                        {sugerenciasHoy.length === 0 && <div className="note">Sin sugerencias para hoy: revisa tus excluidos en Perfil.</div>}
+                        {sugerenciasHoy.map((r) => (
+                          <div className="pane block" key={r.id} style={{ marginTop: 8 }}>
+                            <button style={{ display: "block", width: "100%", textAlign: "left" }}
+                              onClick={() => setRecetaAbierta(recetaAbierta === r.id ? null : r.id)}
+                              aria-expanded={recetaAbierta === r.id}>
+                              <h4 style={{ margin: 0 }}>{r.nombre}</h4>
+                              <p style={{ margin: "4px 0 0" }}>{r.tiempo} min</p>
+                            </button>
+                            {recetaAbierta === r.id && (
+                              <div style={{ marginTop: 10 }}>
+                                {r.usa.length > 0 && (
+                                  <>
+                                    <span className="lbl">Tus porciones</span>
+                                    <div className="pills" style={{ marginTop: 6 }}>
+                                      {r.usa.map((nombre) => {
+                                        const fila = porcionesTotal.find((f) => f[0] === nombre);
+                                        if (!fila) return null;
+                                        const bandaTxt = (perfilCfg.banda && perfilCfg.banda[r.slots[0]]) || "0-300";
+                                        const banda = fila[2 + (bandaTxt.startsWith("300") ? 1 : 0)];
+                                        return <span key={nombre} className="pill" data-on="1">{nombre} · {fmtBanda(banda)}</span>;
+                                      })}
+                                    </div>
+                                  </>
+                                )}
+                                <span className="lbl">Ingredientes</span>
+                                {r.ingredientes.map((ing, i) => <div className="li" key={i}><em>·</em><span>{ing}</span></div>)}
+                                <span className="lbl">Preparación</span>
+                                {r.pasos.map((p2, i) => <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em><span>{p2}</span></div>)}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </>
                     )}
 
                     {p.k === "ruta" && (
@@ -1039,9 +1308,9 @@ export default function Fundamento() {
       <div className="pane block" style={{ marginTop: 9 }}>
         <table className="tbl">
           <thead><tr><th>Alimento</th><th>0–300 cals</th><th>300–700 cals</th></tr></thead>
-          <tbody>{listaPorciones.map((f, i) => <tr key={i}><td>{f[0]}</td><td>{f[2]}</td><td>{f[3]}</td></tr>)}</tbody>
+          <tbody>{listaPorciones.map((f, i) => <tr key={i}><td>{f[0]}</td><td>{fmtBanda(f[2])}</td><td>{fmtBanda(f[3])}</td></tr>)}</tbody>
         </table>
-        <div className="note">Gramos en crudo salvo que diga otra cosa. Si pesas cocido, usa la equivalencia de tu tabla original.</div>
+        <div className="note">Primero el peso en crudo; si el alimento tiene equivalencia ya cocida, va después del punto. Configura cuál prefieres pesar en Perfil.</div>
       </div>
 
       <div className="h3">Medias tardes de emergencia</div>
@@ -1207,9 +1476,101 @@ export default function Fundamento() {
   );
 
   /* ------------------------------ AJUSTES ---------------------------- */
-  const vistaAjustes = (
+  const listaPorciones2 = porcionesTotal.filter((f) => f[1] === filtroPerfil && f[0].toLowerCase().includes(buscaPerfil.toLowerCase()));
+
+  const vistaPerfil = (
     <div className="wrap">
-      <div className="top"><div className="eyebrow">Configuración</div><div className="h1">Ajustes</div></div>
+      <div className="top"><div className="eyebrow">Configuración</div><div className="h1">Perfil</div></div>
+
+      <div className="pane block">
+        <h4>Favoritos y excluidos</h4>
+        <p>Tocar "favorito" prioriza ese alimento al resolver las comidas. Si no marcas favoritos en una categoría, se eligen entre todos los de esa categoría.</p>
+        <div className="pills" style={{ marginTop: 6 }}>
+          {[["C", "Carbohidratos"], ["P", "Proteínas"], ["G", "Grasas"], ["F", "Frutas"]].map(([k, n]) => (
+            <button key={k} className="pill" data-on={filtroPerfil === k ? 1 : 0} onClick={() => setFiltroPerfil(k)}>{n}</button>
+          ))}
+        </div>
+        <input className="fld" placeholder="Buscar alimento" value={buscaPerfil} onChange={(e) => setBuscaPerfil(e.target.value)} />
+        {listaPorciones2.map((f) => {
+          const esFav = (perfilCfg.favoritos[filtroPerfil] || []).includes(f[0]);
+          const esExc = (perfilCfg.excluidos || []).includes(f[0]);
+          return (
+            <div key={f[0]} className="row" style={{ marginTop: 8, alignItems: "center" }}>
+              <span style={{ flex: 1, fontSize: 13.5 }}>{f[0]}</span>
+              <button className="pill" data-on={esFav ? 1 : 0} onClick={() => toggleFavorito(filtroPerfil, f[0])}>Favorito</button>
+              <button className="pill" data-on={esExc ? 1 : 0} onClick={() => toggleExcluido(f[0])}>Excluir</button>
+            </div>
+          );
+        })}
+        {(perfilCfg.excluidos || []).length > 0 && (
+          <>
+            <span className="lbl">Excluidos</span>
+            <div className="pills" style={{ marginTop: 6 }}>
+              {perfilCfg.excluidos.map((n) => (
+                <button key={n} className="pill" data-on="1" onClick={() => toggleExcluido(n)}>{n} ×</button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="pane block">
+        <h4>Banda de calorías por comida</h4>
+        <p>La banda alta (300–700) es para los días con más entreno o más apetito; la baja (0–300), para los más tranquilos.</p>
+        {COMIDAS_KEYS.map((c) => (
+          <div key={c} style={{ marginTop: 10 }}>
+            <span className="lbl">{c.charAt(0).toUpperCase() + c.slice(1)}</span>
+            <div className="pills" style={{ marginTop: 6 }}>
+              {["0-300", "300-700"].map((b) => (
+                <button key={b} className="pill" data-on={perfilCfg.banda[c] === b ? 1 : 0}
+                  onClick={() => setPerfil({ banda: { ...perfilCfg.banda, [c]: b } })}>{b}</button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="pane block">
+        <h4>Cómo pesas los alimentos</h4>
+        <div className="pills" style={{ marginTop: 6 }}>
+          {[["crudo", "Crudo"], ["cocido", "Cocido"]].map(([k, n]) => (
+            <button key={k} className="pill" data-on={perfilCfg.pesar === k ? 1 : 0} onClick={() => setPerfil({ pesar: k })}>{n}</button>
+          ))}
+        </div>
+        <p style={{ marginTop: 10 }}>Rotación: evita repetir la misma proteína que elegiste el día anterior.</p>
+        <button className="pill" data-on={perfilCfg.rotacion ? 1 : 0} onClick={() => setPerfil({ rotacion: !perfilCfg.rotacion })}>
+          {perfilCfg.rotacion ? "Rotación activa" : "Rotación apagada"}
+        </button>
+      </div>
+
+      <div className="pane block">
+        <h4>Agregar un alimento propio</h4>
+        <p>Sus gramos por banda se usan igual que los del plan.</p>
+        <input className="fld" placeholder="Nombre" value={alimentoNuevo.nombre} onChange={(e) => setAlimentoNuevo({ ...alimentoNuevo, nombre: e.target.value })} />
+        <div className="pills" style={{ marginTop: 8 }}>
+          {["P", "C", "G", "F"].map((k) => (
+            <button key={k} className="pill" data-on={alimentoNuevo.cat === k ? 1 : 0} onClick={() => setAlimentoNuevo({ ...alimentoNuevo, cat: k })}>{CAT_LABEL[k]}</button>
+          ))}
+        </div>
+        <div className="row">
+          <div style={{ flex: 1 }}>
+            <span className="lbl">Gramos banda 0–300</span>
+            <input className="fld" inputMode="decimal" value={alimentoNuevo.crudo0} onChange={(e) => setAlimentoNuevo({ ...alimentoNuevo, crudo0: e.target.value })} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span className="lbl">Gramos banda 300–700</span>
+            <input className="fld" inputMode="decimal" value={alimentoNuevo.crudo3} onChange={(e) => setAlimentoNuevo({ ...alimentoNuevo, crudo3: e.target.value })} />
+          </div>
+        </div>
+        <button className="btn solid" onClick={agregarAlimentoExtra}>Agregar alimento</button>
+        {(perfilCfg.porcionesExtra || []).length > 0 && (
+          <div className="pills" style={{ marginTop: 10 }}>
+            {perfilCfg.porcionesExtra.map((a) => (
+              <span key={a.nombre} className="pill" data-on="1">{a.nombre} · {a.gramos0}/{a.gramos3} g</span>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="pane block">
         <h4>Fecha de arranque</h4>
@@ -1259,7 +1620,7 @@ export default function Fundamento() {
         }}>Descargar respaldo</button>
         <button className="btn warn" onClick={() => {
           if (confirm("Se borra todo el historial del bloque, incluidos los chequeos. ¿Seguro?"))
-            guardar({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [], entreno: DEFAULT_ENTRENO });
+            guardar({ inicio: lunesDeEstaSemana(), meta: 3.5, dias: {}, medidas: [], entreno: DEFAULT_ENTRENO, perfil: DEFAULT_PERFIL });
         }}>Borrar todo y empezar de nuevo</button>
       </div>
 
@@ -1267,7 +1628,7 @@ export default function Fundamento() {
     </div>
   );
 
-  const vistas = { hoy: vistaHoy, plan: vistaPlan, mente: vistaMente, datos: vistaDatos, ajustes: vistaAjustes };
+  const vistas = { hoy: vistaHoy, plan: vistaPlan, mente: vistaMente, datos: vistaDatos, perfil: vistaPerfil };
 
   return (
     <div className="fd">
@@ -1276,7 +1637,7 @@ export default function Fundamento() {
       {vistas[tab]}
       <nav className="nav">
         <div className="nav-in">
-          {[["hoy", "Hoy"], ["plan", "Plan"], ["mente", "Mente"], ["datos", "Datos"], ["ajustes", "Ajustes"]].map(([k, n]) => (
+          {[["hoy", "Hoy"], ["plan", "Plan"], ["mente", "Mente"], ["datos", "Datos"], ["perfil", "Perfil"]].map(([k, n]) => (
             <button key={k} data-on={tab === k ? 1 : 0} onClick={() => setTab(k)} aria-current={tab === k}>
               <i /><small>{n}</small>
             </button>
