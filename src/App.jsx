@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { resolver } from "./comidas.js";
 import { RECETAS } from "./data/recetas.js";
+import { EJERCICIOS } from "./data/ejercicios.js";
 
 /* ==========================================================================
    FUNDAMENTO · v2
@@ -284,11 +285,25 @@ const SESION_LABEL = {
 const DEFAULT_ENTRENO = {
   plantilla: ["gymA", "biciZ2", "gymB", "biciSeries", "gymC", "biciLarga", "movilidad"],
   overrides: {},
+  ejerciciosPersonalizados: {},
 };
+
+/* Sustituye ejercicios de una sesión de gym por otros del banco (src/data/ejercicios.js),
+   manteniendo el esquema de series/reps original — eso lo define la semana, no el ejercicio. */
+function aplicarPersonalizados(base, mapa) {
+  if (!mapa) return base;
+  return base.map((ej, i) => {
+    const idCustom = mapa[i];
+    if (!idCustom) return ej;
+    const custom = EJERCICIOS.find((e) => e.id === idCustom);
+    return custom ? [custom.nombre, ej[1]] : ej;
+  });
+}
+
 const SESIONES = {
-  gymA: (semIdx) => ({ tipo: "gym", titulo: GYM.A.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: GYM.A.ej, min: 55 }),
-  gymB: (semIdx) => ({ tipo: "gym", titulo: GYM.B.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: GYM.B.ej, min: 55 }),
-  gymC: (semIdx) => ({ tipo: "gym", titulo: GYM.C.nombre, sub: SERIES[semIdx].v + " · descanso corto, respiración controlada", lista: GYM.C.ej, min: 40 }),
+  gymA: (semIdx, cfg) => ({ tipo: "gym", titulo: GYM.A.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: aplicarPersonalizados(GYM.A.ej, cfg && cfg.ejerciciosPersonalizados && cfg.ejerciciosPersonalizados.gymA), min: 55 }),
+  gymB: (semIdx, cfg) => ({ tipo: "gym", titulo: GYM.B.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: aplicarPersonalizados(GYM.B.ej, cfg && cfg.ejerciciosPersonalizados && cfg.ejerciciosPersonalizados.gymB), min: 55 }),
+  gymC: (semIdx, cfg) => ({ tipo: "gym", titulo: GYM.C.nombre, sub: SERIES[semIdx].v + " · descanso corto, respiración controlada", lista: aplicarPersonalizados(GYM.C.ej, cfg && cfg.ejerciciosPersonalizados && cfg.ejerciciosPersonalizados.gymC), min: 40 }),
   biciZ2: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.z2[0], sub: b.z2[1], lista: [], min: b.z2[2] }; },
   biciSeries: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.int[0], sub: b.int[1], lista: [], min: b.int[2] }; },
   biciLarga: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.larga[0], sub: b.larga[1], lista: [], min: b.larga[2] }; },
@@ -300,7 +315,7 @@ function entrenoDe(sem, dia, config, fechaISO) {
   const cfg = config || DEFAULT_ENTRENO;
   const clave = (fechaISO && cfg.overrides && cfg.overrides[fechaISO]) || cfg.plantilla[dia];
   const gen = SESIONES[clave] || SESIONES.descanso;
-  return { ...gen(sem - 1), clave };
+  return { ...gen(sem - 1, cfg), clave };
 }
 
 function fechaDeSemDia(inicioISO, sem, dia) {
@@ -769,6 +784,7 @@ function Check({ on, onClick, tag, title, sub }) {
   );
 }
 
+const PARTES_EJERCICIO = [...new Set(EJERCICIOS.map((e) => e.parte))].sort((a, b) => a.localeCompare(b, "es"));
 const CAT_LABEL = { P: "Proteína", C: "Carbohidrato", G: "Grasa", F: "Fruta" };
 const FACTOR_LABEL = { 0.5: "media porción", 1.5: "porción y media" };
 const MESA_COMIDA = { m1: "desayuno", m2: "almuerzo", m3: "media", m4: "cena" };
@@ -861,6 +877,12 @@ export default function Fundamento() {
   const [buscaPerfil, setBuscaPerfil] = useState("");
   const [recetaAbierta, setRecetaAbierta] = useState(null);
   const [alimentoNuevo, setAlimentoNuevo] = useState({ nombre: "", cat: "P", crudo0: "", crudo3: "" });
+  const [cambiandoEjercicio, setCambiandoEjercicio] = useState(null);
+  const [buscaEjercicio, setBuscaEjercicio] = useState("");
+  const [partePersonalizar, setPartePersonalizar] = useState("todas");
+  const [buscaBanco, setBuscaBanco] = useState("");
+  const [partePersonalizarBanco, setPartePersonalizarBanco] = useState("todas");
+  const [ejercicioAbierto, setEjercicioAbierto] = useState(null);
   const [cap, setCap] = useState({ sab: "evitador", que: "", dijo: "", sabio: "" });
   const [chk, setChk] = useState({});
   const [aviso, setAviso] = useState("");
@@ -937,6 +959,11 @@ export default function Fundamento() {
     const overrides = { ...(entrenoCfg.overrides || {}) };
     if (val) overrides[fecha] = val; else delete overrides[fecha];
     setEntreno({ overrides });
+  };
+  const setEjercicioPersonalizado = (claveSesion, indice, idEjercicio) => {
+    const actual = (entrenoCfg.ejerciciosPersonalizados && entrenoCfg.ejerciciosPersonalizados[claveSesion]) || {};
+    const siguiente = { ...actual, [indice]: idEjercicio || undefined };
+    setEntreno({ ejerciciosPersonalizados: { ...(entrenoCfg.ejerciciosPersonalizados || {}), [claveSesion]: siguiente } });
   };
 
   function setPerfil(campos) {
@@ -1145,8 +1172,39 @@ export default function Fundamento() {
                     {p.k === "ruta" && (
                       <>
                         {plan.entreno.lista.map((e, i) => (
-                          <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em>
-                            <span>{e[0]} — <span style={{ color: "var(--dim)" }}>{e[1]}</span></span></div>
+                          <React.Fragment key={i}>
+                            <div className="li"><em>{String(i + 1).padStart(2, "0")}</em>
+                              <span style={{ flex: 1 }}>{e[0]} — <span style={{ color: "var(--dim)" }}>{e[1]}</span></span>
+                              {plan.entreno.tipo === "gym" && (
+                                <button className="pill" onClick={() => { setCambiandoEjercicio(cambiandoEjercicio === i ? null : i); setBuscaEjercicio(""); setPartePersonalizar("todas"); }}>
+                                  Cambiar
+                                </button>
+                              )}
+                            </div>
+                            {cambiandoEjercicio === i && (
+                              <div style={{ marginBottom: 10 }}>
+                                <input className="fld" placeholder="Buscar ejercicio" value={buscaEjercicio} onChange={(ev) => setBuscaEjercicio(ev.target.value)} />
+                                <div className="pills" style={{ marginTop: 6 }}>
+                                  <button className="pill" data-on={partePersonalizar === "todas" ? 1 : 0} onClick={() => setPartePersonalizar("todas")}>Todas</button>
+                                  {PARTES_EJERCICIO.map((p3) => (
+                                    <button key={p3} className="pill" data-on={partePersonalizar === p3 ? 1 : 0} onClick={() => setPartePersonalizar(p3)}>{p3}</button>
+                                  ))}
+                                </div>
+                                <div style={{ maxHeight: 230, overflowY: "auto", marginTop: 6 }}>
+                                  {EJERCICIOS.filter((ej) =>
+                                    (partePersonalizar === "todas" || ej.parte === partePersonalizar) &&
+                                    ej.nombre.toLowerCase().includes(buscaEjercicio.toLowerCase())
+                                  ).slice(0, 25).map((ej) => (
+                                    <button key={ej.id} className="pill" style={{ display: "block", width: "100%", textAlign: "left", marginTop: 4 }}
+                                      onClick={() => { setEjercicioPersonalizado(plan.entreno.clave, i, ej.id); setCambiandoEjercicio(null); }}>
+                                      {ej.nombre} <span style={{ color: "var(--dim)" }}>· {ej.parte} · {ej.equipo}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                                <button className="btn" onClick={() => { setEjercicioPersonalizado(plan.entreno.clave, i, null); setCambiandoEjercicio(null); }}>Volver al ejercicio original</button>
+                              </div>
+                            )}
+                          </React.Fragment>
                         ))}
                         <span className="lbl">Cambiar solo hoy</span>
                         <select className="fld" aria-label="Cambiar el entreno solo de hoy" value={(entrenoCfg.overrides || {})[fecha] || ""} onChange={(e) => setOverrideHoy(e.target.value)}>
@@ -1601,6 +1659,33 @@ export default function Fundamento() {
           <Carga sem={sem} hoyDia={dia} config={entrenoCfg} inicio={state.inicio} />
         </div>
         {avisosEntreno(entrenoCfg.plantilla).map((a, i) => <div className="note" key={i}>{a}</div>)}
+      </div>
+
+      <div className="pane block">
+        <h4>Banco de ejercicios</h4>
+        <p>Para cambiar un ejercicio dentro de una sesión de gym, ve a Hoy → Ruta y toca "Cambiar" junto al ejercicio. Aquí puedes explorar el banco completo.</p>
+        <input className="fld" placeholder="Buscar ejercicio" value={buscaBanco} onChange={(e) => setBuscaBanco(e.target.value)} />
+        <div className="pills" style={{ marginTop: 8 }}>
+          <button className="pill" data-on={partePersonalizarBanco === "todas" ? 1 : 0} onClick={() => setPartePersonalizarBanco("todas")}>Todas</button>
+          {PARTES_EJERCICIO.map((p3) => (
+            <button key={p3} className="pill" data-on={partePersonalizarBanco === p3 ? 1 : 0} onClick={() => setPartePersonalizarBanco(p3)}>{p3}</button>
+          ))}
+        </div>
+        {EJERCICIOS.filter((ej) =>
+          (partePersonalizarBanco === "todas" || ej.parte === partePersonalizarBanco) &&
+          ej.nombre.toLowerCase().includes(buscaBanco.toLowerCase())
+        ).slice(0, 40).map((ej) => (
+          <div key={ej.id} style={{ marginTop: 8 }}>
+            <button style={{ display: "block", width: "100%", textAlign: "left" }}
+              onClick={() => setEjercicioAbierto(ejercicioAbierto === ej.id ? null : ej.id)} aria-expanded={ejercicioAbierto === ej.id}>
+              <span className="chk-txt">{ej.nombre}<span className="chk-sub">{ej.parte} · {ej.equipo} · {ej.objetivo}</span></span>
+            </button>
+            {ejercicioAbierto === ej.id && ej.pasos.map((p3, i) => (
+              <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em><span>{p3}</span></div>
+            ))}
+          </div>
+        ))}
+        <div className="note">Ejercicios e instrucciones de exercises-dataset (github.com/hasaneyldrm/exercises-dataset), licencia MIT, atribución Gym Visual.</div>
       </div>
 
       <div className="pane block">
