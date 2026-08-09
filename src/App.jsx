@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { resolver } from "./comidas.js";
 import { RECETAS } from "./data/recetas.js";
-import { EJERCICIOS } from "./data/ejercicios.js";
 
 /* ==========================================================================
    FUNDAMENTO · v2
@@ -274,36 +273,27 @@ const BICI = [
     larga: ["Salida larga · 1 h 45 suave", "Sin series. Disfrutar y cerrar el bloque entero.", 105] },
 ];
 
-/* Días de entrenamiento configurables: plantilla semanal + overrides puntuales.
-   La progresión (reps, RPE, minutos) sigue viniendo del índice de semana. */
+/* Días de entrenamiento configurables: cada una de las 4 semanas del bloque tiene su
+   propia plantilla (se programa semana a semana, no es un patrón que se repite), más
+   overrides puntuales por fecha. La progresión (reps, RPE, minutos) sigue viniendo del
+   índice de semana. */
 const SESIONES_VALIDAS = ["gymA", "gymB", "gymC", "biciZ2", "biciSeries", "biciLarga", "movilidad", "descanso"];
 const SESION_LABEL = {
   gymA: "Gimnasio A", gymB: "Gimnasio B", gymC: "Gimnasio C",
   biciZ2: "Bici Z2", biciSeries: "Bici series", biciLarga: "Salida larga",
   movilidad: "Movilidad", descanso: "Descanso",
 };
+const PLANTILLA_BASE = ["gymA", "biciZ2", "gymB", "biciSeries", "gymC", "biciLarga", "movilidad"];
 const DEFAULT_ENTRENO = {
-  plantilla: ["gymA", "biciZ2", "gymB", "biciSeries", "gymC", "biciLarga", "movilidad"],
+  semanas: { 1: [...PLANTILLA_BASE], 2: [...PLANTILLA_BASE], 3: [...PLANTILLA_BASE], 4: [...PLANTILLA_BASE] },
   overrides: {},
-  ejerciciosPersonalizados: {},
+  planificada: { 1: false, 2: false, 3: false, 4: false },
 };
 
-/* Sustituye ejercicios de una sesión de gym por otros del banco (src/data/ejercicios.js),
-   manteniendo el esquema de series/reps original — eso lo define la semana, no el ejercicio. */
-function aplicarPersonalizados(base, mapa) {
-  if (!mapa) return base;
-  return base.map((ej, i) => {
-    const idCustom = mapa[i];
-    if (!idCustom) return ej;
-    const custom = EJERCICIOS.find((e) => e.id === idCustom);
-    return custom ? [custom.nombre, ej[1]] : ej;
-  });
-}
-
 const SESIONES = {
-  gymA: (semIdx, cfg) => ({ tipo: "gym", titulo: GYM.A.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: aplicarPersonalizados(GYM.A.ej, cfg && cfg.ejerciciosPersonalizados && cfg.ejerciciosPersonalizados.gymA), min: 55 }),
-  gymB: (semIdx, cfg) => ({ tipo: "gym", titulo: GYM.B.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: aplicarPersonalizados(GYM.B.ej, cfg && cfg.ejerciciosPersonalizados && cfg.ejerciciosPersonalizados.gymB), min: 55 }),
-  gymC: (semIdx, cfg) => ({ tipo: "gym", titulo: GYM.C.nombre, sub: SERIES[semIdx].v + " · descanso corto, respiración controlada", lista: aplicarPersonalizados(GYM.C.ej, cfg && cfg.ejerciciosPersonalizados && cfg.ejerciciosPersonalizados.gymC), min: 40 }),
+  gymA: (semIdx) => ({ tipo: "gym", titulo: GYM.A.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: GYM.A.ej, min: 55 }),
+  gymB: (semIdx) => ({ tipo: "gym", titulo: GYM.B.nombre, sub: SERIES[semIdx].s + " · " + SERIES[semIdx].rpe, lista: GYM.B.ej, min: 55 }),
+  gymC: (semIdx) => ({ tipo: "gym", titulo: GYM.C.nombre, sub: SERIES[semIdx].v + " · descanso corto, respiración controlada", lista: GYM.C.ej, min: 40 }),
   biciZ2: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.z2[0], sub: b.z2[1], lista: [], min: b.z2[2] }; },
   biciSeries: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.int[0], sub: b.int[1], lista: [], min: b.int[2] }; },
   biciLarga: (semIdx) => { const b = BICI[semIdx]; return { tipo: "bici", titulo: b.larga[0], sub: b.larga[1], lista: [], min: b.larga[2] }; },
@@ -311,11 +301,15 @@ const SESIONES = {
   descanso: () => ({ tipo: "descanso", titulo: "Descanso completo", sub: "Sin sesión estructurada. El cuerpo absorbe la carga de los días duros — camina suave si te provoca.", lista: [], min: 0 }),
 };
 
+function plantillaDeSemana(cfg, sem) {
+  return (cfg.semanas && cfg.semanas[sem]) || PLANTILLA_BASE;
+}
+
 function entrenoDe(sem, dia, config, fechaISO) {
   const cfg = config || DEFAULT_ENTRENO;
-  const clave = (fechaISO && cfg.overrides && cfg.overrides[fechaISO]) || cfg.plantilla[dia];
+  const clave = (fechaISO && cfg.overrides && cfg.overrides[fechaISO]) || plantillaDeSemana(cfg, sem)[dia];
   const gen = SESIONES[clave] || SESIONES.descanso;
-  return { ...gen(sem - 1, cfg), clave };
+  return { ...gen(sem - 1), clave };
 }
 
 function fechaDeSemDia(inicioISO, sem, dia) {
@@ -533,7 +527,8 @@ const store = (typeof window !== 'undefined' && window.storage) ? window.storage
   set: async (k, v) => { localStorage.setItem(k, v); return { key: k, value: v }; },
 };
 
-const KEY = "fundamento:v3";
+const KEY = "fundamento:v4";
+const KEY_V3 = "fundamento:v3";
 const KEY_V2 = "fundamento:v2";
 const KEY_V1 = "fundamento:v1";
 const DEFAULT_PERFIL = {
@@ -546,6 +541,23 @@ const DEFAULT_PERFIL = {
 };
 function migrarV1aV2(v1) { return { ...v1, entreno: v1.entreno || DEFAULT_ENTRENO }; }
 function migrarV2aV3(v2) { return { ...v2, perfil: v2.perfil || DEFAULT_PERFIL }; }
+/* v3 traía una sola plantilla para las 4 semanas; v4 permite programar cada semana
+   aparte. La plantilla vieja se copia a las 4 semanas para no perder la configuración,
+   y se marca como "ya planificada" — el usuario ya la había revisado. */
+function migrarV3aV4(v3) {
+  const e = v3.entreno;
+  let entreno = DEFAULT_ENTRENO;
+  if (e && e.plantilla) {
+    entreno = {
+      semanas: { 1: [...e.plantilla], 2: [...e.plantilla], 3: [...e.plantilla], 4: [...e.plantilla] },
+      overrides: e.overrides || {},
+      planificada: { 1: true, 2: true, 3: true, 4: true },
+    };
+  } else if (e && e.semanas) {
+    entreno = { semanas: e.semanas, overrides: e.overrides || {}, planificada: e.planificada || { 1: true, 2: true, 3: true, 4: true } };
+  }
+  return { ...v3, entreno };
+}
 const iso = (d) => d.toISOString().slice(0, 10);
 const hoyISO = () => iso(new Date());
 function parseISO(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
@@ -784,7 +796,6 @@ function Check({ on, onClick, tag, title, sub }) {
   );
 }
 
-const PARTES_EJERCICIO = [...new Set(EJERCICIOS.map((e) => e.parte))].sort((a, b) => a.localeCompare(b, "es"));
 const CAT_LABEL = { P: "Proteína", C: "Carbohidrato", G: "Grasa", F: "Fruta" };
 const FACTOR_LABEL = { 0.5: "media porción", 1.5: "porción y media" };
 const MESA_COMIDA = { m1: "desayuno", m2: "almuerzo", m3: "media", m4: "cena" };
@@ -877,12 +888,7 @@ export default function Fundamento() {
   const [buscaPerfil, setBuscaPerfil] = useState("");
   const [recetaAbierta, setRecetaAbierta] = useState(null);
   const [alimentoNuevo, setAlimentoNuevo] = useState({ nombre: "", cat: "P", crudo0: "", crudo3: "" });
-  const [cambiandoEjercicio, setCambiandoEjercicio] = useState(null);
-  const [buscaEjercicio, setBuscaEjercicio] = useState("");
-  const [partePersonalizar, setPartePersonalizar] = useState("todas");
-  const [buscaBanco, setBuscaBanco] = useState("");
-  const [partePersonalizarBanco, setPartePersonalizarBanco] = useState("todas");
-  const [ejercicioAbierto, setEjercicioAbierto] = useState(null);
+  const [semanaEditando, setSemanaEditando] = useState(1);
   const [cap, setCap] = useState({ sab: "evitador", que: "", dijo: "", sabio: "" });
   const [chk, setChk] = useState({});
   const [aviso, setAviso] = useState("");
@@ -892,14 +898,18 @@ export default function Fundamento() {
     (async () => {
       let cargado = null;
       try {
-        const r3 = await store.get(KEY);
-        if (r3 && r3.value) cargado = JSON.parse(r3.value);
+        const r4 = await store.get(KEY);
+        if (r4 && r4.value) cargado = JSON.parse(r4.value);
         else {
-          const r2 = await store.get(KEY_V2);
-          if (r2 && r2.value) cargado = migrarV2aV3(JSON.parse(r2.value));
+          const r3 = await store.get(KEY_V3);
+          if (r3 && r3.value) cargado = migrarV3aV4(JSON.parse(r3.value));
           else {
-            const r1 = await store.get(KEY_V1);
-            if (r1 && r1.value) cargado = migrarV2aV3(migrarV1aV2(JSON.parse(r1.value)));
+            const r2 = await store.get(KEY_V2);
+            if (r2 && r2.value) cargado = migrarV3aV4(migrarV2aV3(JSON.parse(r2.value)));
+            else {
+              const r1 = await store.get(KEY_V1);
+              if (r1 && r1.value) cargado = migrarV3aV4(migrarV2aV3(migrarV1aV2(JSON.parse(r1.value))));
+            }
           }
         }
       } catch (e) { cargado = null; }
@@ -951,19 +961,27 @@ export default function Fundamento() {
     if (!state) return;
     guardar({ ...state, entreno: { ...entrenoCfg, ...campos } });
   }
-  const setPlantillaDia = (i, val) => {
-    const plantilla = [...entrenoCfg.plantilla]; plantilla[i] = val;
-    setEntreno({ plantilla });
+  const setPlantillaDia = (semanaN, i, val) => {
+    const dias7 = [...plantillaDeSemana(entrenoCfg, semanaN)]; dias7[i] = val;
+    setEntreno({
+      semanas: { ...entrenoCfg.semanas, [semanaN]: dias7 },
+      planificada: { ...entrenoCfg.planificada, [semanaN]: true },
+    });
+  };
+  const confirmarSemana = (semanaN) => {
+    setEntreno({ planificada: { ...entrenoCfg.planificada, [semanaN]: true } });
+  };
+  const copiarSemanaAnterior = (semanaN) => {
+    if (semanaN <= 1) return;
+    setEntreno({
+      semanas: { ...entrenoCfg.semanas, [semanaN]: [...plantillaDeSemana(entrenoCfg, semanaN - 1)] },
+      planificada: { ...entrenoCfg.planificada, [semanaN]: true },
+    });
   };
   const setOverrideHoy = (val) => {
     const overrides = { ...(entrenoCfg.overrides || {}) };
     if (val) overrides[fecha] = val; else delete overrides[fecha];
     setEntreno({ overrides });
-  };
-  const setEjercicioPersonalizado = (claveSesion, indice, idEjercicio) => {
-    const actual = (entrenoCfg.ejerciciosPersonalizados && entrenoCfg.ejerciciosPersonalizados[claveSesion]) || {};
-    const siguiente = { ...actual, [indice]: idEjercicio || undefined };
-    setEntreno({ ejerciciosPersonalizados: { ...(entrenoCfg.ejerciciosPersonalizados || {}), [claveSesion]: siguiente } });
   };
 
   function setPerfil(campos) {
@@ -1074,6 +1092,14 @@ export default function Fundamento() {
           <small>{totalHechos} de {totalTareas} cumplidos · racha de {racha} días firmes</small></div>
       </div>
 
+      {dentro && dia === 0 && (!entrenoCfg.planificada || !entrenoCfg.planificada[sem]) && (
+        <div className="pane block" style={{ borderColor: "var(--ruta)" }}>
+          <h4>Programa la semana {sem}</h4>
+          <p>Es lunes: define qué sesión toca cada día antes de arrancar. Por ahora está usando la plantilla por defecto.</p>
+          <button className="btn solid" onClick={() => { setSemanaEditando(sem); setTab("perfil"); }}>Programar esta semana</button>
+        </div>
+      )}
+
       <div className="pane hud">
         <AnillosHUD valores={valoresHoy} total={pct} />
         <div className="hud-side">
@@ -1172,43 +1198,12 @@ export default function Fundamento() {
                     {p.k === "ruta" && (
                       <>
                         {plan.entreno.lista.map((e, i) => (
-                          <React.Fragment key={i}>
-                            <div className="li"><em>{String(i + 1).padStart(2, "0")}</em>
-                              <span style={{ flex: 1 }}>{e[0]} — <span style={{ color: "var(--dim)" }}>{e[1]}</span></span>
-                              {plan.entreno.tipo === "gym" && (
-                                <button className="pill" onClick={() => { setCambiandoEjercicio(cambiandoEjercicio === i ? null : i); setBuscaEjercicio(""); setPartePersonalizar("todas"); }}>
-                                  Cambiar
-                                </button>
-                              )}
-                            </div>
-                            {cambiandoEjercicio === i && (
-                              <div style={{ marginBottom: 10 }}>
-                                <input className="fld" placeholder="Buscar ejercicio" value={buscaEjercicio} onChange={(ev) => setBuscaEjercicio(ev.target.value)} />
-                                <div className="pills" style={{ marginTop: 6 }}>
-                                  <button className="pill" data-on={partePersonalizar === "todas" ? 1 : 0} onClick={() => setPartePersonalizar("todas")}>Todas</button>
-                                  {PARTES_EJERCICIO.map((p3) => (
-                                    <button key={p3} className="pill" data-on={partePersonalizar === p3 ? 1 : 0} onClick={() => setPartePersonalizar(p3)}>{p3}</button>
-                                  ))}
-                                </div>
-                                <div style={{ maxHeight: 230, overflowY: "auto", marginTop: 6 }}>
-                                  {EJERCICIOS.filter((ej) =>
-                                    (partePersonalizar === "todas" || ej.parte === partePersonalizar) &&
-                                    ej.nombre.toLowerCase().includes(buscaEjercicio.toLowerCase())
-                                  ).slice(0, 25).map((ej) => (
-                                    <button key={ej.id} className="pill" style={{ display: "block", width: "100%", textAlign: "left", marginTop: 4 }}
-                                      onClick={() => { setEjercicioPersonalizado(plan.entreno.clave, i, ej.id); setCambiandoEjercicio(null); }}>
-                                      {ej.nombre} <span style={{ color: "var(--dim)" }}>· {ej.parte} · {ej.equipo}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                                <button className="btn" onClick={() => { setEjercicioPersonalizado(plan.entreno.clave, i, null); setCambiandoEjercicio(null); }}>Volver al ejercicio original</button>
-                              </div>
-                            )}
-                          </React.Fragment>
+                          <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em>
+                            <span>{e[0]} — <span style={{ color: "var(--dim)" }}>{e[1]}</span></span></div>
                         ))}
                         <span className="lbl">Cambiar solo hoy</span>
                         <select className="fld" aria-label="Cambiar el entreno solo de hoy" value={(entrenoCfg.overrides || {})[fecha] || ""} onChange={(e) => setOverrideHoy(e.target.value)}>
-                          <option value="">Usar la plantilla ({SESION_LABEL[entrenoCfg.plantilla[dia]]})</option>
+                          <option value="">Usar la plantilla ({SESION_LABEL[plantillaDeSemana(entrenoCfg, sem)[dia]]})</option>
                           {SESIONES_VALIDAS.map((k) => <option key={k} value={k}>{SESION_LABEL[k]}</option>)}
                         </select>
                         {(entrenoCfg.overrides || {})[fecha] && (
@@ -1468,15 +1463,20 @@ export default function Fundamento() {
         <div className="heat">
           {serie.map((v, i) => {
             const d = parseISO(state.inicio); d.setDate(d.getDate() + i);
+            const fISO = iso(d);
+            const irADia = () => { setFecha(fISO); setTab("hoy"); };
             return (
-              <div className="hcell" key={i} data-today={i === idxDia ? 1 : 0} title={iso(d)}
-                style={{ background: v > 0 ? `rgba(34,224,214,${0.06 + v * 0.34})` : "transparent",
+              <div className="hcell" key={i} data-today={i === idxDia ? 1 : 0} title={fISO}
+                role="button" tabIndex={0} aria-label={"Ver el " + fISO}
+                onClick={irADia} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); irADia(); } }}
+                style={{ cursor: "pointer", background: v > 0 ? `rgba(34,224,214,${0.06 + v * 0.34})` : "transparent",
                   boxShadow: v >= 0.8 ? "0 0 10px rgba(34,224,214,.3) inset" : "none" }}>
                 {d.getDate()}
               </div>
             );
           })}
         </div>
+        <div className="note">Toca un día para ver su detalle en Hoy.</div>
       </div>
 
       <div className="h3">Chequeo corporal</div>
@@ -1644,48 +1644,36 @@ export default function Fundamento() {
 
       <div className="pane block">
         <h4>Semana de entrenamiento</h4>
-        <p>Qué sesión toca cada día de la semana. La progresión (reps, RPE, minutos) sigue viniendo de la semana del bloque en la que estés.</p>
+        <p>Cada una de las 4 semanas del bloque tiene su propio plan — puedes variarlo semana a semana (por ejemplo, una semana de descarga). La progresión (reps, RPE, minutos) sigue viniendo de la semana del bloque en la que estés.</p>
+        <div className="pills" style={{ marginTop: 6 }}>
+          {[1, 2, 3, 4].map((s) => (
+            <button key={s} className="pill" data-on={semanaEditando === s ? 1 : 0} onClick={() => setSemanaEditando(s)}>
+              Semana {s}{(!entrenoCfg.planificada || !entrenoCfg.planificada[s]) ? " · sin programar" : ""}
+            </button>
+          ))}
+        </div>
         {DIAS.map((dn, i) => (
           <div key={dn} style={{ marginTop: 10 }}>
             <span className="lbl">{dn}</span>
-            <select className="fld" aria-label={"Sesión del " + dn} value={entrenoCfg.plantilla[i]} onChange={(e) => setPlantillaDia(i, e.target.value)}>
+            <select className="fld" aria-label={"Sesión del " + dn + " · semana " + semanaEditando}
+              value={plantillaDeSemana(entrenoCfg, semanaEditando)[i]}
+              onChange={(e) => setPlantillaDia(semanaEditando, i, e.target.value)}>
               {SESIONES_VALIDAS.map((k) => <option key={k} value={k}>{SESION_LABEL[k]}</option>)}
             </select>
           </div>
         ))}
+        {semanaEditando > 1 && (
+          <button className="btn" onClick={() => copiarSemanaAnterior(semanaEditando)}>Copiar la semana {semanaEditando - 1}</button>
+        )}
+        <button className="btn solid" onClick={() => confirmarSemana(semanaEditando)}>
+          {entrenoCfg.planificada && entrenoCfg.planificada[semanaEditando] ? "Semana confirmada" : "Confirmar esta semana"}
+        </button>
         <div style={{ marginTop: 14 }}>
           <div className="charthead"><b>Carga en vivo · minutos por día</b>
-            <span>{DIAS.reduce((a, _, i) => a + entrenoDe(sem, i, entrenoCfg, fechaDeSemDia(state.inicio, sem, i)).min, 0)} min</span></div>
-          <Carga sem={sem} hoyDia={dia} config={entrenoCfg} inicio={state.inicio} />
+            <span>{DIAS.reduce((a, _, i) => a + entrenoDe(semanaEditando, i, entrenoCfg, fechaDeSemDia(state.inicio, semanaEditando, i)).min, 0)} min</span></div>
+          <Carga sem={semanaEditando} hoyDia={semanaEditando === sem ? dia : -1} config={entrenoCfg} inicio={state.inicio} />
         </div>
-        {avisosEntreno(entrenoCfg.plantilla).map((a, i) => <div className="note" key={i}>{a}</div>)}
-      </div>
-
-      <div className="pane block">
-        <h4>Banco de ejercicios</h4>
-        <p>Para cambiar un ejercicio dentro de una sesión de gym, ve a Hoy → Ruta y toca "Cambiar" junto al ejercicio. Aquí puedes explorar el banco completo.</p>
-        <input className="fld" placeholder="Buscar ejercicio" value={buscaBanco} onChange={(e) => setBuscaBanco(e.target.value)} />
-        <div className="pills" style={{ marginTop: 8 }}>
-          <button className="pill" data-on={partePersonalizarBanco === "todas" ? 1 : 0} onClick={() => setPartePersonalizarBanco("todas")}>Todas</button>
-          {PARTES_EJERCICIO.map((p3) => (
-            <button key={p3} className="pill" data-on={partePersonalizarBanco === p3 ? 1 : 0} onClick={() => setPartePersonalizarBanco(p3)}>{p3}</button>
-          ))}
-        </div>
-        {EJERCICIOS.filter((ej) =>
-          (partePersonalizarBanco === "todas" || ej.parte === partePersonalizarBanco) &&
-          ej.nombre.toLowerCase().includes(buscaBanco.toLowerCase())
-        ).slice(0, 40).map((ej) => (
-          <div key={ej.id} style={{ marginTop: 8 }}>
-            <button style={{ display: "block", width: "100%", textAlign: "left" }}
-              onClick={() => setEjercicioAbierto(ejercicioAbierto === ej.id ? null : ej.id)} aria-expanded={ejercicioAbierto === ej.id}>
-              <span className="chk-txt">{ej.nombre}<span className="chk-sub">{ej.parte} · {ej.equipo} · {ej.objetivo}</span></span>
-            </button>
-            {ejercicioAbierto === ej.id && ej.pasos.map((p3, i) => (
-              <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em><span>{p3}</span></div>
-            ))}
-          </div>
-        ))}
-        <div className="note">Ejercicios e instrucciones de exercises-dataset (github.com/hasaneyldrm/exercises-dataset), licencia MIT, atribución Gym Visual.</div>
+        {avisosEntreno(plantillaDeSemana(entrenoCfg, semanaEditando)).map((a, i) => <div className="note" key={i}>{a}</div>)}
       </div>
 
       <div className="pane block">
