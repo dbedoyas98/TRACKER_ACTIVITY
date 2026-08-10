@@ -34,6 +34,34 @@ Cada build hashea el contenido de `app.js` (`dist/app.<hash>.js`), actualiza la
 referencia en `index.html`, y estampa un `CACHE` nuevo (con timestamp) en
 `sw.js`. Sin esto el teléfono se queda con la versión vieja instalada.
 
+## Publicar en GitHub Pages
+
+Es la vía activa hoy. El workflow (`.github/workflows/github-pages.yml`) corre
+`npm ci && npm test && npm run build` y publica `dist/` — no se comitea el
+build a ninguna rama, lo genera la Action en cada push.
+
+Dispara en push a `feat/optimizacion-total` (no a `main`, a propósito: esa
+rama tiene todo el trabajo de esta sesión y `main` se dejó sin tocar). Pasos
+que te tocan a ti:
+
+1. Crea el repo vacío en GitHub (sin README/licencia/gitignore — ya los
+   tenemos localmente): `github.com/new`.
+2. Pásame la URL (`https://github.com/tuusuario/turepo.git`) para que yo
+   agregue el remoto y suba las ramas.
+3. En el repo → *Settings* → *Pages* → *Build and deployment* → *Source*:
+   elige **GitHub Actions** (no "Deploy from a branch" — esa opción serviría
+   contenido del repo tal cual, y `dist/` no está comiteado).
+4. El primer push a `feat/optimizacion-total` dispara el deploy. La URL queda
+   en `https://tuusuario.github.io/turepo/` (o la que muestre el job
+   `deploy` al terminar).
+
+Como todas las rutas del build son relativas (`./app.js`, `./sw.js`, etc.),
+funciona igual en la raíz de un dominio que en un subdirectorio como
+`/turepo/` — no hace falta configurar ningún `base path`.
+
+Para publicar cambios nuevos después: push a `feat/optimizacion-total` y listo,
+el workflow reconstruye y redespliega solo.
+
 ## Publicar en Azure Static Web Apps
 
 El repo ya trae el workflow (`.github/workflows/azure-static-web-apps.yml`) y la
@@ -105,13 +133,11 @@ npm run build
 npx swa deploy ./dist --env production --deployment-token <token>
 ```
 
-## Otras opciones sin Azure
+## Otras opciones sin Azure ni GitHub Actions
 
 Sirve archivos estáticos puros — cualquier host de sitios estáticos funciona
 con el contenido de `dist/` tras `npm run build`:
 
-- **GitHub Pages:** sube el contenido de `dist/` a la rama/carpeta que sirva
-  Pages.
 - **Netlify Drop:** arrastra `dist/` a `app.netlify.com/drop`.
 - **Vercel:** `vercel --prod` apuntando a `dist/` como output.
 
