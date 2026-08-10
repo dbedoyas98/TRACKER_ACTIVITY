@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { resolver } from "./comidas.js";
 import { RECETAS } from "./data/recetas.js";
 import {
@@ -6,7 +6,8 @@ import {
   ESTUDIO, SABOTEADORES, FOCO_MENTE, PORCIONES, SNACKS, PRE_ENTRENO, MEDIDAS, PILARES,
 } from "./data/plan.js";
 import { bandaRuido } from "./engine/tendencia.js";
-import { cargaSesion } from "./engine/carga.js";
+import { cargaSesion, serieCarga } from "./engine/carga.js";
+import { disposicionDiaria } from "./engine/disposicion.js";
 import { importarActividad } from "./engine/importar.js";
 import ModoSesion from "./views/ModoSesion.jsx";
 
@@ -191,6 +192,10 @@ textarea.fld { resize:vertical; min-height:74px; font-family:var(--body); line-h
 .axis { display:flex; justify-content:space-between; font-family:var(--mono); font-size:9px; letter-spacing:.16em; color:var(--dimmer); margin-top:8px; }
 @keyframes pulse { 0%,100% { opacity:.25; r:9 } 50% { opacity:0; r:15 } }
 .pulse { animation:pulse 2.4s ease-out infinite; }
+@keyframes cierrePop { 0% { opacity:0; transform:scale(.85); } 100% { opacity:1; transform:scale(1); } }
+.cierre-pop { animation:cierrePop var(--dur-base) var(--ease); }
+@keyframes cierreFila { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+.cierre-fila { animation:cierreFila var(--dur-base) var(--ease) backwards; }
 @media (prefers-reduced-motion: reduce) { .fd * { transition:none !important; animation:none !important; } }
 `;
 
@@ -401,35 +406,40 @@ function AnillosHUD({ valores, total }) {
   );
 }
 
-function PerfilEtapa({ serie, hoyIdx, alto = 120 }) {
+/* Elemento firma: se lee como una etapa de montaña. La ALTURA de cada tramo es la
+   carga real de entreno de ese día (motor de carga); el COLOR es la adherencia —
+   mismo lenguaje visual que el calendario de Datos, para que se lean juntos. */
+function PerfilEtapa({ serie, cargas, hoyIdx, alto = 120 }) {
   const W = 700, H = alto, base = H - 16, techo = 14;
-  const pts = serie.map((v, i) => [(i / 27) * W, base - v * (base - techo)]);
+  const maxCarga = Math.max(1, ...cargas);
+  const cargaNorm = cargas.map((c) => c / maxCarga);
+  const pts = cargaNorm.map((v, i) => [(i / 27) * W, base - v * (base - techo)]);
   const linea = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-  const area = linea + ` L ${W} ${base} L 0 ${base} Z`;
-  const meta = base - 0.8 * (base - techo);
+  const anchoBarra = W / 28;
   const hp = pts[Math.max(0, Math.min(hoyIdx, 27))];
   return (
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: alto }}
-      role="img" aria-label="Perfil de cumplimiento de los 28 días">
+      role="img" aria-label="Perfil de la etapa: altura es la carga de entreno del día, color es la adherencia">
       <defs>
-        <linearGradient id="pf" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#22E0D6" stopOpacity="0.45" />
-          <stop offset="100%" stopColor="#22E0D6" stopOpacity="0" />
-        </linearGradient>
         <filter id="gl2" x="-20%" y="-60%" width="140%" height="260%">
           <feGaussianBlur stdDeviation="2.5" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
         </filter>
       </defs>
-      {[0.25, 0.5, 0.75].map((g) => (
-        <line key={g} x1="0" y1={base - g * (base - techo)} x2={W} y2={base - g * (base - techo)} stroke="#0E2033" strokeWidth="1" />
-      ))}
       {[1, 2, 3].map((i) => (
         <line key={i} x1={(i * 7 / 27) * W} y1="4" x2={(i * 7 / 27) * W} y2={base} stroke="#16324A" strokeWidth="1" strokeDasharray="2 5" />
       ))}
-      <line x1="0" y1={meta} x2={W} y2={meta} stroke="#FFB020" strokeWidth="1" strokeDasharray="6 5" opacity=".55" />
       <line x1="0" y1={base} x2={W} y2={base} stroke="#16324A" strokeWidth="1" />
-      <path d={area} fill="url(#pf)" />
-      <path d={linea} fill="none" stroke="#22E0D6" strokeWidth="2" strokeLinejoin="round" filter="url(#gl2)" vectorEffect="non-scaling-stroke" />
+      {cargaNorm.map((v, i) => {
+        const adh = serie[i] || 0;
+        const x = i * anchoBarra;
+        const h = v * (base - techo);
+        return (
+          <rect key={i} x={x} y={base - h} width={anchoBarra - 1} height={h}
+            fill={adh >= 0.8 ? "#22E0D6" : adh > 0 ? "#FFB020" : "#16324A"}
+            opacity={adh > 0 ? 0.25 + adh * 0.5 : 0.15} />
+        );
+      })}
+      <path d={linea} fill="none" stroke="#DCEBF7" strokeWidth="1.5" strokeLinejoin="round" filter="url(#gl2)" opacity=".85" vectorEffect="non-scaling-stroke" />
       {hoyIdx >= 0 && hoyIdx <= 27 && (
         <g>
           <line x1={hp[0]} y1={techo - 8} x2={hp[0]} y2={base} stroke="#FFB020" strokeWidth="1" opacity=".7" vectorEffect="non-scaling-stroke" />
@@ -628,6 +638,40 @@ function ComidaChk({ id, tag, title, on, onToggle, resuelto, abierta, onAbrir, e
   );
 }
 
+function BloqueFoco({ completados, onCompletar }) {
+  const [minutos, setMinutos] = useState(50);
+  const [segundos, setSegundos] = useState(50 * 60);
+  const [corriendo, setCorriendo] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!corriendo) return;
+    ref.current = setInterval(() => setSegundos((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => clearInterval(ref.current);
+  }, [corriendo]);
+
+  const mm = String(Math.floor(segundos / 60)).padStart(2, "0");
+  const ss = String(segundos % 60).padStart(2, "0");
+
+  return (
+    <div className="pane block" style={{ textAlign: "center" }}>
+      <span className="lbl">Bloque de foco · {completados} hoy</span>
+      <div className="pills" style={{ justifyContent: "center", marginTop: 8 }}>
+        {[25, 50, 90].map((m) => (
+          <button key={m} className="pill" data-on={minutos === m ? 1 : 0}
+            onClick={() => { setMinutos(m); setSegundos(m * 60); setCorriendo(false); }}>{m} min</button>
+        ))}
+      </div>
+      <div className="num" style={{ fontFamily: "var(--disp)", fontSize: "var(--fs-display)", fontWeight: 700, margin: "10px 0" }}>{mm}:{ss}</div>
+      <div className="pills" style={{ justifyContent: "center" }}>
+        <button className="pill" data-on={corriendo ? 1 : 0} onClick={() => setCorriendo((c) => !c)}>{corriendo ? "Pausar" : "Iniciar"}</button>
+        <button className="pill" onClick={() => { setCorriendo(false); setSegundos(minutos * 60); }}>Reiniciar</button>
+      </div>
+      <button className="btn solid" onClick={() => { onCompletar(); setCorriendo(false); setSegundos(minutos * 60); }}>Registrar bloque completado</button>
+    </div>
+  );
+}
+
 /* ==========================================================================
    APP
    ========================================================================== */
@@ -648,6 +692,8 @@ export default function Fundamento() {
   const [semanaEditando, setSemanaEditando] = useState(1);
   const [mercadoCopiado, setMercadoCopiado] = useState(false);
   const [modoSesion, setModoSesion] = useState(false);
+  const [dispAbierta, setDispAbierta] = useState(false);
+  const [cierreAbierto, setCierreAbierto] = useState(false);
   const [cap, setCap] = useState({ sab: "evitador", que: "", dijo: "", sabio: "" });
   const [chk, setChk] = useState({});
   const [aviso, setAviso] = useState("");
@@ -744,6 +790,13 @@ export default function Fundamento() {
   const totalTareas = PILARES.reduce((a, p) => a + plan[p.k].length, 0);
   const totalHechos = PILARES.reduce((a, p) => a + plan[p.k].filter((t) => hechos[t.id]).length, 0);
   const pct = totalTareas ? totalHechos / totalTareas : 0;
+
+  // Siguiente acción: el primer pendiente, en el orden de los cinco frentes.
+  let siguienteAccion = null;
+  for (const p of PILARES) {
+    const pendiente = plan[p.k].find((t) => !hechos[t.id]);
+    if (pendiente) { siguienteAccion = { pilar: p, tarea: pendiente }; break; }
+  }
 
   function setDia(campos) {
     if (!state) return;
@@ -904,11 +957,38 @@ export default function Fundamento() {
     });
   }, [state]);
 
+  // Racha con memoria corta: cuántos de los últimos 7 días fueron firmes (≥80%).
+  // Un día flojo ya no borra semanas de racha — solo resta un punto en la ventana.
   const racha = useMemo(() => {
-    let r = 0;
-    for (let i = Math.min(idxDia, 27); i >= 0; i--) { if (serie[i] >= 0.8) r++; else break; }
-    return r;
+    const desde = Math.max(0, Math.min(idxDia, 27) - 6);
+    return serie.slice(desde, Math.min(idxDia, 27) + 1).filter((v) => v >= 0.8).length;
   }, [serie, idxDia]);
+
+  const cargaSerie = useMemo(() => {
+    if (!state) return new Array(28).fill(0);
+    return new Array(28).fill(0).map((_, i) => {
+      const sem2 = Math.floor(i / 7) + 1, dia2 = i % 7;
+      const d = parseISO(state.inicio); d.setDate(d.getDate() + i);
+      const e = entrenoDe(sem2, dia2, state.entreno, iso(d));
+      return cargaSesion(e.clave, e.min);
+    });
+  }, [state]);
+
+  const curvaCarga = useMemo(() => serieCarga(cargaSerie), [cargaSerie]);
+  const tsbHoy = curvaCarga[Math.min(idxDia, 27)] ? curvaCarga[Math.min(idxDia, 27)].tsb : null;
+
+  const disposicion = useMemo(() => {
+    const desdeAdh = Math.max(0, Math.min(idxDia, 27) - 6);
+    const adherencia7d = serie.slice(desdeAdh, Math.min(idxDia, 27) + 1);
+    const adhProm = adherencia7d.length ? adherencia7d.reduce((a, b) => a + b, 0) / adherencia7d.length : null;
+    const horas = parseFloat(dd.sueno);
+    return disposicionDiaria({
+      horasSueno: Number.isNaN(horas) ? null : horas,
+      energia: dd.energia,
+      tsb: dentro ? tsbHoy : null,
+      adherencia7d: adhProm,
+    });
+  }, [dd.sueno, dd.energia, tsbHoy, serie, idxDia, dentro]);
 
   const porPilar = useMemo(() => {
     const acc = {}; PILARES.forEach((p) => (acc[p.k] = 0));
@@ -942,8 +1022,28 @@ export default function Fundamento() {
       <div className="top">
         <div className="eyebrow">{dentro ? `Semana ${sem} · día ${idxDia + 1} / 28` : "Fuera del bloque"}</div>
         <div className="h1">{fechaLarga.charAt(0).toUpperCase() + fechaLarga.slice(1)}
-          <small>{totalHechos} de {totalTareas} cumplidos · racha de {racha} días firmes</small></div>
+          <small>{totalHechos} de {totalTareas} cumplidos · {racha} de los últimos 7 días, firmes</small></div>
       </div>
+
+      <button className="pane block" style={{ display: "block", width: "100%", textAlign: "left" }}
+        onClick={() => setDispAbierta((v) => !v)} aria-expanded={dispAbierta}>
+        <div className="charthead">
+          <b>Disposición de hoy</b>
+          <span className="num" style={{ fontFamily: "var(--disp)", fontWeight: 700, fontSize: "var(--fs-h1)", color: "var(--ruta)" }}>{disposicion.valor}</span>
+        </div>
+        {dispAbierta ? (
+          disposicion.factores.map((f) => (
+            <div key={f.nombre} style={{ marginTop: 8 }}>
+              <div className="axis"><span>{f.nombre}{f.medido ? "" : " (sin dato hoy)"}</span><span>{f.valor}</span></div>
+              <div style={{ height: 4, background: "var(--grid)", marginTop: 4 }}>
+                <div style={{ height: "100%", width: f.valor + "%", background: f.medido ? "var(--ruta)" : "var(--dimmer)" }} />
+              </div>
+            </div>
+          ))
+        ) : (
+          <p style={{ margin: 0 }}>Toca para ver qué la mueve: sueño, forma, energía y adherencia reciente.</p>
+        )}
+      </button>
 
       {dentro && dia === 0 && (!entrenoCfg.planificada || !entrenoCfg.planificada[sem]) && (
         <div className="pane block" style={{ borderColor: "var(--ruta)" }}>
@@ -966,9 +1066,23 @@ export default function Fundamento() {
         </div>
       </div>
 
+      {siguienteAccion ? (
+        <button className="pane block" style={{ display: "block", width: "100%", textAlign: "left", marginTop: 9, "--pc": siguienteAccion.pilar.c, borderColor: siguienteAccion.pilar.c }}
+          onClick={() => setAbierto({ ...abierto, [siguienteAccion.pilar.k]: true })}>
+          <span className="lbl" style={{ color: siguienteAccion.pilar.c }}>Lo siguiente · {siguienteAccion.pilar.n}</span>
+          <h4 style={{ margin: "4px 0 0" }}>{siguienteAccion.tarea.t}</h4>
+          {siguienteAccion.tarea.s && <p style={{ margin: "4px 0 0" }}>{siguienteAccion.tarea.s}</p>}
+        </button>
+      ) : (
+        <div className="pane block" style={{ marginTop: 9, borderColor: "var(--load-optimal)" }}>
+          <h4>Cerraste los cinco frentes</h4>
+          <p>Nada pendiente hoy. Mañana empieza de nuevo.</p>
+        </div>
+      )}
+
       <div className="pane chartwrap" style={{ marginTop: 9 }}>
         <div className="charthead"><b>Perfil del bloque · 28 días</b><span>{Math.round(serie.slice(0, Math.min(idxDia + 1, 28)).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(idxDia + 1, 28)) * 100)}%</span></div>
-        <PerfilEtapa serie={serie} hoyIdx={idxDia} alto={110} />
+        <PerfilEtapa serie={serie} cargas={cargaSerie} hoyIdx={idxDia} alto={110} />
         <div className="axis"><span>SEM 1</span><span>SEM 2</span><span>SEM 3</span><span>SEM 4</span></div>
       </div>
 
@@ -1195,6 +1309,32 @@ export default function Fundamento() {
         </div>
       )}
 
+      {dd.cerrado ? (
+        <div className="pane block cierre-pop" style={{ textAlign: "center", borderColor: "var(--load-optimal)" }}>
+          <span className="lbl">Día cerrado</span>
+          <div className="num" style={{ fontFamily: "var(--disp)", fontWeight: 700, fontSize: "var(--fs-display)", color: "var(--ruta)", margin: "6px 0" }}>
+            {Math.round(pct * 100)}%
+          </div>
+          <p style={{ margin: 0 }}>{totalHechos} de {totalTareas} cumplidos hoy.</p>
+        </div>
+      ) : cierreAbierto ? (
+        <div className="pane block cierre-pop" style={{ textAlign: "center" }}>
+          <span className="lbl">Cerrando el día</span>
+          <div className="num" style={{ fontFamily: "var(--disp)", fontWeight: 700, fontSize: "var(--fs-display)", margin: "6px 0" }}>
+            {Math.round(pct * 100)}%
+          </div>
+          {PILARES.map((p, i) => (
+            <div className="hl cierre-fila" key={p.k} style={{ "--hc": p.c, justifyContent: "center", animationDelay: (i * 60) + "ms" }}>
+              <u /><b>{p.n}</b><i>{Math.round((valoresHoy[p.k] || 0) * 100)}%</i>
+            </div>
+          ))}
+          <button className="btn solid" onClick={() => { setDia({ cerrado: true }); setCierreAbierto(false); }}>Confirmar cierre</button>
+          <button className="btn" onClick={() => setCierreAbierto(false)}>Todavía no</button>
+        </div>
+      ) : (
+        <button className="btn solid" onClick={() => setCierreAbierto(true)}>Cerrar el día</button>
+      )}
+
       <div className="note">El plan de alimentación viene tal cual de tu nutricionista: aquí solo está organizado por día. Porciones, suplementos y medicamentos los decides con ella.</div>
     </div>
   );
@@ -1319,12 +1459,39 @@ export default function Fundamento() {
   todasCapturas.forEach((c) => { conteo[c.sab] = (conteo[c.sab] || 0) + 1; });
   const maxC = Math.max(1, ...Object.values(conteo));
 
+  // Revisión del bloque: las 28 líneas del día, en orden — ese es el valor, no cada
+  // una suelta. Solo días ya pasados o el de hoy.
+  const notasBloque = new Array(Math.min(idxDia + 1, 28)).fill(0).map((_, i) => {
+    const d = parseISO(state.inicio); d.setDate(d.getDate() + i);
+    const fISO = iso(d);
+    const reg = state.dias[fISO];
+    return { dia: i + 1, fecha: fISO, nota: reg && reg.nota };
+  });
+
   const vistaMente = (
-    <div className="wrap">
+    <div className="wrap" style={{ lineHeight: 1.7, letterSpacing: ".01em" }}>
       <div className="top">
         <div className="eyebrow">Los tres que te hablan</div>
         <div className="h1">Mente<small>Nombrarlos les quita el volante</small></div>
       </div>
+
+      <div className="pane block">
+        <span className="lbl">Chequeo de hoy</span>
+        <p style={{ marginTop: 6, marginBottom: 4 }}>Energía</p>
+        <div className="pills">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button key={n} className="pill" data-on={dd.energiaMente === n ? 1 : 0} onClick={() => setDia({ energiaMente: n })}>{n}</button>
+          ))}
+        </div>
+        <p style={{ marginTop: 14, marginBottom: 4 }}>Ánimo</p>
+        <div className="pills">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button key={n} className="pill" data-on={dd.animoMente === n ? 1 : 0} onClick={() => setDia({ animoMente: n })}>{n}</button>
+          ))}
+        </div>
+      </div>
+
+      <BloqueFoco completados={dd.bloquesFoco || 0} onCompletar={() => setDia({ bloquesFoco: (dd.bloquesFoco || 0) + 1 })} />
 
       <div className="pane block" style={{ borderColor: "rgba(255,92,138,.45)" }}>
         <h4>{FOCO_MENTE[sem - 1].t}</h4><p>{FOCO_MENTE[sem - 1].d}</p>
@@ -1366,6 +1533,15 @@ export default function Fundamento() {
           ))}
         </>
       )}
+
+      <div className="h3">Revisión del bloque</div>
+      <div className="pane block">
+        <p>Las líneas del día, juntas. Eso es lo que vale, no cada una suelta.</p>
+        {notasBloque.filter((n) => n.nota).length === 0 && <div className="note">Sin líneas todavía. Escribe una desde Hoy, al cerrar el día.</div>}
+        {notasBloque.filter((n) => n.nota).map((n) => (
+          <p key={n.fecha}><b style={{ color: "var(--text)" }}>Día {n.dia}.</b> {n.nota}</p>
+        ))}
+      </div>
     </div>
   );
 
@@ -1382,7 +1558,7 @@ export default function Fundamento() {
 
       <div className="pane chartwrap">
         <div className="charthead"><b>Perfil del bloque</b><span>{Math.round(promedio * 100)}%</span></div>
-        <PerfilEtapa serie={serie} hoyIdx={idxDia} alto={130} />
+        <PerfilEtapa serie={serie} cargas={cargaSerie} hoyIdx={idxDia} alto={130} />
         <div className="axis"><span>SEM 1</span><span>SEM 2</span><span>SEM 3</span><span>SEM 4</span></div>
         <div className="note">La línea ámbar es el 80 %: por encima de ahí el día cuenta como firme.</div>
       </div>
