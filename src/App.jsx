@@ -5,6 +5,8 @@ import {
   DIAS, DIAS_C, DETOX, NUTRI, GYM, SERIES, BICI,
   ESTUDIO, SABOTEADORES, FOCO_MENTE, PORCIONES, SNACKS, PRE_ENTRENO, MEDIDAS, PILARES,
 } from "./data/plan.js";
+import { bandaRuido } from "./engine/tendencia.js";
+import { cargaSesion } from "./engine/carga.js";
 
 /* ==========================================================================
    FUNDAMENTO · v2
@@ -311,6 +313,14 @@ function diffDias(a, b) { return Math.round((parseISO(b) - parseISO(a)) / 864000
 function lunesDeEstaSemana() { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return iso(d); }
 
 
+/* Timing nutricional: qué recomendación de PRE_ENTRENO (texto real del plan) aplica
+   contra la sesión real de hoy — no una lista genérica, la que corresponde. */
+function timingHoy(entreno) {
+  if (entreno.tipo === "bici" && entreno.min >= 90) return [PRE_ENTRENO[1], PRE_ENTRENO[2]];
+  if (entreno.min > 60) return [PRE_ENTRENO[0]];
+  return [];
+}
+
 function tareasDe(sem, dia, config, fechaISO) {
   const n = NUTRI[sem - 1][dia];
   const e = entrenoDe(sem, dia, config, fechaISO);
@@ -498,27 +508,33 @@ function Tendencia({ datos, campo, color, unidad }) {
   if (vals.length < 2) return null;
   const W = 700, H = 90, pad = 10;
   const ys = vals.map((v) => v[campo]);
-  const min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
-  const pts = vals.map((v, i) => [
-    pad + (i / (vals.length - 1)) * (W - pad * 2),
-    H - pad - ((v[campo] - min) / span) * (H - pad * 2),
-  ]);
-  const linea = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-  const delta = Math.round((ys[ys.length - 1] - ys[0]) * 10) / 10;
+  const banda = bandaRuido(ys, 7);
+  const mm = banda.map((b) => b.media);
+  const min = Math.min(...banda.map((b) => b.min), ...ys), max = Math.max(...banda.map((b) => b.max), ...ys);
+  const span = max - min || 1;
+  const x = (i) => pad + (i / (vals.length - 1)) * (W - pad * 2);
+  const y = (v) => H - pad - ((v - min) / span) * (H - pad * 2);
+  const puntos = vals.map((v, i) => [x(i), y(v[campo])]);
+  const lineaMM = mm.map((v, i) => (i === 0 ? "M" : "L") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+  const areaBanda = banda.map((b, i) => (i === 0 ? "M" : "L") + x(i).toFixed(1) + " " + y(b.max).toFixed(1)).join(" ")
+    + " " + banda.map((b, i) => "L" + x(banda.length - 1 - i).toFixed(1) + " " + y(banda[banda.length - 1 - i].min).toFixed(1)).join(" ") + " Z";
+  const ultimaMM = Math.round(mm[mm.length - 1] * 10) / 10;
+  const deltaMM = Math.round((mm[mm.length - 1] - mm[0]) * 10) / 10;
   return (
     <div style={{ marginTop: 14 }}>
       <div className="charthead">
-        <b>{campo === "peso" ? "Peso" : MEDIDAS.find((m) => m[0] === campo)[1]}</b>
-        <span style={{ color: delta <= 0 ? color : "#FFB020", fontSize: 15 }}>
-          {ys[ys.length - 1]} {unidad} · {delta > 0 ? "+" : ""}{delta}
+        <b>{campo === "peso" ? "Peso" : MEDIDAS.find((m) => m[0] === campo)[1]} · media móvil 7 días</b>
+        <span style={{ color: deltaMM <= 0 ? color : "#FFB020", fontSize: 15 }}>
+          {ultimaMM} {unidad} · {deltaMM > 0 ? "+" : ""}{deltaMM}
         </span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: 80 }}>
-        <path d={linea + ` L ${pts[pts.length - 1][0]} ${H} L ${pts[0][0]} ${H} Z`} fill={color} opacity=".07" />
-        <path d={linea} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
-        {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="3" fill={color} />)}
+        <path d={areaBanda} fill={color} opacity=".08" />
+        <path d={lineaMM} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        {puntos.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.5" fill={color} opacity=".4" />)}
       </svg>
       <div className="axis"><span>{vals[0].fecha}</span><span>{vals[vals.length - 1].fecha}</span></div>
+      <div className="note">Puntos tenues: dato real de cada registro. Línea y banda: media móvil de 7 días y su ruido — el dato de un día solo no dice nada.</div>
     </div>
   );
 }
@@ -628,6 +644,7 @@ export default function Fundamento() {
   const [recetaAbierta, setRecetaAbierta] = useState(null);
   const [alimentoNuevo, setAlimentoNuevo] = useState({ nombre: "", cat: "P", crudo0: "", crudo3: "" });
   const [semanaEditando, setSemanaEditando] = useState(1);
+  const [mercadoCopiado, setMercadoCopiado] = useState(false);
   const [cap, setCap] = useState({ sab: "evitador", que: "", dijo: "", sabio: "" });
   const [chk, setChk] = useState({});
   const [aviso, setAviso] = useState("");
@@ -674,11 +691,47 @@ export default function Fundamento() {
   const dd = (state && state.dias[fecha]) || {};
   const hechos = dd.done || {};
 
+  // Meta de agua ajustada por la carga de hoy: hasta +0.75 L en el día más duro del
+  // bloque. Es un ajuste declarado, no una prescripción — se muestra el desglose.
+  const cargaHoy = plan ? cargaSesion(plan.entreno.clave, plan.entreno.min) : 0;
+  const ajusteAgua = Math.round(Math.min(0.75, cargaHoy / 150) * 100) / 100;
+  const metaAguaHoy = Math.round(((state ? state.meta : 3.5) + ajusteAgua) * 100) / 100;
+
   const perfilCfg = (state && state.perfil) || DEFAULT_PERFIL;
   const porcionesTotal = useMemo(
     () => PORCIONES.concat((perfilCfg.porcionesExtra || []).map((a) => [a.nombre, a.cat, { crudo: a.gramos0, cocido: null }, { crudo: a.gramos3, cocido: null }])),
     [perfilCfg.porcionesExtra]
   );
+
+  // Lista de mercado: agrega la opción principal resuelta de cada comida de los
+  // próximos 7 días (desde hoy real, no desde el día que estés revisando).
+  const listaMercado = useMemo(() => {
+    if (!state) return {};
+    const idxHoy = diffDias(state.inicio, hoyISO());
+    const total = {};
+    for (let i = 0; i < 7; i++) {
+      const idx = idxHoy + i;
+      if (idx < 0 || idx > 27) continue;
+      const semD = Math.floor(idx / 7) + 1, diaD = idx % 7;
+      const d = parseISO(state.inicio); d.setDate(d.getDate() + idx);
+      const fISO = iso(d);
+      const nutriDia = NUTRI[semD - 1][diaD];
+      COMIDAS_KEYS.forEach((comida, mi) => {
+        const r = resolver(nutriDia[mi], { fecha: fISO, comida, perfil: perfilCfg, porciones: porcionesTotal });
+        r.partes.forEach((parte) => {
+          if (parte.tipo !== "porcion") return;
+          const op = parte.opciones[0];
+          if (!op || typeof op.gramos !== "number") return;
+          const fila = porcionesTotal.find((f) => f[0] === op.alimento);
+          const cat = fila ? fila[1] : parte.cat;
+          const key = op.alimento;
+          if (!total[key]) total[key] = { cat, gramos: 0 };
+          total[key].gramos += op.gramos;
+        });
+      });
+    }
+    return total;
+  }, [state, perfilCfg, porcionesTotal]);
 
   const valoresHoy = {};
   PILARES.forEach((p) => {
@@ -891,11 +944,21 @@ export default function Fundamento() {
                         <div className="water">
                           <button className="wbtn" onClick={() => agua(-0.25)} aria-label="Quitar 250 ml">−</button>
                           <div className="wtrack">
-                            <div className="wfill" style={{ width: Math.min(100, ((dd.agua || 0) / state.meta) * 100) + "%" }} />
-                            <div className="wlabel">{(dd.agua || 0).toFixed(2)} / {state.meta} L</div>
+                            <div className="wfill" style={{ width: Math.min(100, ((dd.agua || 0) / metaAguaHoy) * 100) + "%" }} />
+                            <div className="wlabel">{(dd.agua || 0).toFixed(2)} / {metaAguaHoy} L</div>
                           </div>
                           <button className="wbtn" onClick={() => agua(0.25)} aria-label="Sumar 250 ml">+</button>
                         </div>
+                        {ajusteAgua > 0 && (
+                          <div className="note">Meta base {state.meta} L + {ajusteAgua} L por la carga de hoy ({plan.entreno.titulo}).</div>
+                        )}
+
+                        {timingHoy(plan.entreno).length > 0 && (
+                          <div className="pane block" style={{ marginTop: 12 }}>
+                            <h4>Antes y durante el entreno de hoy</h4>
+                            {timingHoy(plan.entreno).map((t, i) => <p key={i}>{t}</p>)}
+                          </div>
+                        )}
 
                         <span className="lbl" style={{ marginTop: 18 }}>Qué puedes cocinar hoy</span>
                         {sugerenciasHoy.length === 0 && <div className="note">Sin sugerencias para hoy: revisa tus excluidos en Perfil.</div>}
@@ -1107,6 +1170,33 @@ export default function Fundamento() {
 
       <div className="h3">Medias tardes de emergencia</div>
       {SNACKS.map((s, i) => <div className="pane block" key={i}><h4>{s[0]}</h4><p>{s[1]}</p></div>)}
+
+      <div className="h3">Lista de mercado · próximos 7 días</div>
+      <div className="pane block">
+        <p>Suma la opción principal de cada comida desde hoy. Si cambias favoritos o excluidos, se recalcula sola.</p>
+        {["P", "C", "G", "F"].map((cat) => {
+          const items = Object.entries(listaMercado).filter(([, v]) => v.cat === cat);
+          if (!items.length) return null;
+          return (
+            <div key={cat} style={{ marginTop: 10 }}>
+              <span className="lbl">{CAT_LABEL[cat]}</span>
+              {items.map(([nombre, v]) => (
+                <div className="li" key={nombre}><em>·</em><span>{nombre} — {Math.round(v.gramos)} g</span></div>
+              ))}
+            </div>
+          );
+        })}
+        {Object.keys(listaMercado).length === 0 && <div className="note">Fuera del bloque de 28 días: no hay plan para los próximos 7 días.</div>}
+        <button className="btn" onClick={() => {
+          const texto = ["P", "C", "G", "F"].map((cat) => {
+            const items = Object.entries(listaMercado).filter(([, v]) => v.cat === cat);
+            if (!items.length) return "";
+            return `${CAT_LABEL[cat]}:\n` + items.map(([n, v]) => `- ${n}: ${Math.round(v.gramos)} g`).join("\n");
+          }).filter(Boolean).join("\n\n");
+          if (navigator.clipboard) navigator.clipboard.writeText(texto).then(() => setMercadoCopiado(true));
+        }}>Copiar para WhatsApp</button>
+        {mercadoCopiado && <div className="note">Lista copiada al portapapeles.</div>}
+      </div>
     </div>
   );
 
@@ -1342,7 +1432,7 @@ export default function Fundamento() {
 
       <div className="pane block">
         <h4>Agregar un alimento propio</h4>
-        <p>Sus gramos por banda se usan igual que los del plan.</p>
+        <p>Sus gramos por banda se usan igual que los del plan. Úsalo para sumar alimentos de tu dieta que no estén en la tabla — no inventamos equivalencias que no vengan de tu nutricionista o de ti.</p>
         <input className="fld" placeholder="Nombre" value={alimentoNuevo.nombre} onChange={(e) => setAlimentoNuevo({ ...alimentoNuevo, nombre: e.target.value })} />
         <div className="pills" style={{ marginTop: 8 }}>
           {["P", "C", "G", "F"].map((k) => (
