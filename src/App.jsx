@@ -112,6 +112,11 @@ const CSS = `
 .chk-txt { font-size:14px; line-height:1.42; }
 .chk[data-on="1"] .chk-txt { color:var(--dim); }
 .chk-sub { display:block; font-size:12.5px; color:var(--dim); margin-top:4px; line-height:1.5; }
+.chk-wrap { border-bottom:1px solid rgba(22,50,74,.6); }
+.chk-wrap:last-child { border-bottom:none; }
+.chk-wrap .chk { border-bottom:none; padding-bottom:2px; }
+.chk-ver { display:block; width:100%; text-align:left; font-family:var(--mono); font-size:10px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--dim); padding:2px 0 12px 30px; min-height:32px; }
 .tag { font-family:var(--mono); font-size:9.5px; letter-spacing:.14em; color:var(--pc); border:1px solid var(--pc); padding:1px 5px; margin-right:7px; opacity:.85; }
 
 /* agua */
@@ -604,39 +609,38 @@ function sugerirRecetas(fecha, categoriasDelDia, perfil, diasState) {
 
 function ComidaChk({ id, tag, title, on, onToggle, resuelto, abierta, onAbrir, elegido, onElegir }) {
   return (
-    <div className="chk" data-on={on ? 1 : 0}>
-      <button className="box" aria-pressed={on} aria-label={"Marcar " + title + " como cumplida"} onClick={onToggle}>
-        <svg viewBox="0 0 12 12" fill="none">
+    <div className="chk-wrap">
+      <button className="chk" data-on={on ? 1 : 0} onClick={onToggle} aria-pressed={on}>
+        <span className="box"><svg viewBox="0 0 12 12" fill="none">
           <path d="M1.5 6.2 4.4 9 10.5 3" stroke="#050B12" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        </svg></span>
+        <span className="chk-txt">{tag ? <span className="tag">{tag}</span> : null}{title}
+          <span className="chk-sub">{resuelto.original}</span></span>
       </button>
-      <span className="chk-txt" style={{ flex: 1 }}>
-        <button onClick={onAbrir} aria-expanded={abierta} style={{ display: "block", width: "100%", textAlign: "left" }}>
-          {tag ? <span className="tag">{tag}</span> : null}{title}
-          <span className="chk-sub">{resuelto.original}</span>
-        </button>
-        {abierta && (
-          <div style={{ marginTop: 10 }}>
-            {resuelto.partes.map((parte, i) => parte.tipo === "literal"
-              ? (parte.texto ? <div className="li" key={i}><em>·</em><span>{parte.texto}</span></div> : null)
-              : (
-                <div key={i} style={{ marginTop: 8 }}>
-                  <span className="lbl">{CAT_LABEL[parte.cat]}{FACTOR_LABEL[parte.factor] ? " · " + FACTOR_LABEL[parte.factor] : ""}</span>
-                  <div className="pills" style={{ marginTop: 6 }}>
-                    {parte.opciones.map((op) => (
-                      <button key={op.alimento} className="pill"
-                        data-on={elegido && elegido[parte.cat] === op.alimento ? 1 : 0}
-                        onClick={() => onElegir(parte.cat, op.alimento)}>
-                        {op.alimento}{op.gramos != null ? ` · ${op.gramos} g${op.peso ? " " + op.peso : ""}` : ` · ${op.unidad}`}
-                      </button>
-                    ))}
-                  </div>
+      <button className="chk-ver" onClick={onAbrir} aria-expanded={abierta}>
+        {abierta ? "▴ Ocultar opciones" : "▾ Ver opciones y elegir qué comer"}
+      </button>
+      {abierta && (
+        <div style={{ padding: "0 0 12px 30px" }}>
+          {resuelto.partes.map((parte, i) => parte.tipo === "literal"
+            ? (parte.texto ? <div className="li" key={i}><em>·</em><span>{parte.texto}</span></div> : null)
+            : (
+              <div key={i} style={{ marginTop: 8 }}>
+                <span className="lbl">{CAT_LABEL[parte.cat]}{FACTOR_LABEL[parte.factor] ? " · " + FACTOR_LABEL[parte.factor] : ""}</span>
+                <div className="pills" style={{ marginTop: 6 }}>
+                  {parte.opciones.map((op) => (
+                    <button key={op.alimento} className="pill"
+                      data-on={elegido && elegido[parte.cat] === op.alimento ? 1 : 0}
+                      onClick={() => onElegir(parte.cat, op.alimento)}>
+                      {op.alimento}{op.gramos != null ? ` · ${op.gramos} g${op.peso ? " " + op.peso : ""}` : ` · ${op.unidad}`}
+                    </button>
+                  ))}
                 </div>
-              )
-            )}
-          </div>
-        )}
-      </span>
+              </div>
+            )
+          )}
+        </div>
+      )}
     </div>
   );
 }
