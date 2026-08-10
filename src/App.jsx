@@ -9,6 +9,7 @@ import { bandaRuido } from "./engine/tendencia.js";
 import { cargaSesion, serieCarga } from "./engine/carga.js";
 import { disposicionDiaria } from "./engine/disposicion.js";
 import { importarActividad } from "./engine/importar.js";
+import { pearson, frasePearson } from "./engine/correlacion.js";
 import ModoSesion from "./views/ModoSesion.jsx";
 
 /* ==========================================================================
@@ -451,12 +452,13 @@ function PerfilEtapa({ serie, cargas, hoyIdx, alto = 120 }) {
   );
 }
 
-function Radar({ valores }) {
+function Radar({ valores, comparar }) {
   const S = 240, c = S / 2, R = 84;
   const ang = (i) => (-90 + i * 72) * (Math.PI / 180);
   const pt = (i, r) => [c + Math.cos(ang(i)) * r, c + Math.sin(ang(i)) * r];
   const anillo = (f) => PILARES.map((_, i) => pt(i, R * f).join(",")).join(" ");
   const forma = PILARES.map((p, i) => pt(i, R * Math.max(0.04, valores[p.k] || 0)).join(",")).join(" ");
+  const formaAnterior = comparar ? PILARES.map((p, i) => pt(i, R * Math.max(0.04, comparar[p.k] || 0)).join(",")).join(" ") : null;
   return (
     <svg viewBox={`0 0 ${S} ${S}`} style={{ display: "block", width: "100%", maxWidth: 300, margin: "0 auto" }}
       role="img" aria-label="Radar de cumplimiento por frente">
@@ -467,6 +469,7 @@ function Radar({ valores }) {
         const [x, y] = pt(i, R);
         return <line key={p.k} x1={c} y1={c} x2={x} y2={y} stroke="#16324A" strokeWidth="1" />;
       })}
+      {formaAnterior && <polygon points={formaAnterior} fill="none" stroke="#6E90AB" strokeWidth="1.5" strokeDasharray="4 4" />}
       <polygon points={forma} fill="rgba(34,224,214,.14)" stroke="#22E0D6" strokeWidth="1.5" />
       {PILARES.map((p, i) => {
         const [x, y] = pt(i, R * Math.max(0.04, valores[p.k] || 0));
@@ -1008,6 +1011,68 @@ export default function Fundamento() {
     return out;
   }, [state, idxDia]);
 
+  // Ciclo anterior: los 28 días antes de este bloque, solo si de verdad hay registro
+  // ahí — nunca se rellena con ceros inventados. Usa la config de entreno actual
+  // (no se guarda un histórico de plantillas), así que Ruta es aproximado.
+  const porPilarAnterior = useMemo(() => {
+    if (!state) return null;
+    const inicioAnt = parseISO(state.inicio); inicioAnt.setDate(inicioAnt.getDate() - 28);
+    const inicioAntISO = iso(inicioAnt);
+    const hayDatos = Object.keys(state.dias).some((f) => f >= inicioAntISO && f < state.inicio && state.dias[f].done);
+    if (!hayDatos) return null;
+    const acc = {}, tot = {};
+    PILARES.forEach((p) => { acc[p.k] = 0; tot[p.k] = 0; });
+    for (let i = 0; i < 28; i++) {
+      const d = parseISO(inicioAntISO); d.setDate(d.getDate() + i);
+      const fISO = iso(d);
+      const reg = state.dias[fISO];
+      const p = tareasDe(Math.floor(i / 7) + 1, i % 7, state.entreno, fISO);
+      PILARES.forEach((pi) => {
+        tot[pi.k] += p[pi.k].length;
+        if (reg && reg.done) acc[pi.k] += p[pi.k].filter((t) => reg.done[t.id]).length;
+      });
+    }
+    const out = {}; PILARES.forEach((p) => (out[p.k] = tot[p.k] ? acc[p.k] / tot[p.k] : 0));
+    return out;
+  }, [state]);
+
+  // Adherencia por pilar, semana a semana — para ver cuál frente se cae primero.
+  const adherenciaPorSemana = useMemo(() => {
+    if (!state) return [];
+    return [1, 2, 3, 4].map((semN) => {
+      const acc = {}, tot = {};
+      PILARES.forEach((p) => { acc[p.k] = 0; tot[p.k] = 0; });
+      for (let d2 = 0; d2 < 7; d2++) {
+        const idx = (semN - 1) * 7 + d2;
+        if (idx > Math.min(idxDia, 27)) continue;
+        const fd = parseISO(state.inicio); fd.setDate(fd.getDate() + idx);
+        const fISO = iso(fd);
+        const reg = state.dias[fISO];
+        const p = tareasDe(semN, d2, state.entreno, fISO);
+        PILARES.forEach((pi) => {
+          tot[pi.k] += p[pi.k].length;
+          if (reg && reg.done) acc[pi.k] += p[pi.k].filter((t) => reg.done[t.id]).length;
+        });
+      }
+      const out = { semana: semN };
+      PILARES.forEach((p) => (out[p.k] = tot[p.k] ? acc[p.k] / tot[p.k] : null));
+      return out;
+    });
+  }, [state, idxDia]);
+
+  // Correlación exploratoria: horas de sueño vs. adherencia del mismo día.
+  const correlacionSueno = useMemo(() => {
+    if (!state) return null;
+    const xs = [], ys = [];
+    for (let i = 0; i <= Math.min(idxDia, 27); i++) {
+      const d = parseISO(state.inicio); d.setDate(d.getDate() + i);
+      const reg = state.dias[iso(d)];
+      const horas = reg && parseFloat(reg.sueno);
+      if (reg && !Number.isNaN(horas)) { xs.push(horas); ys.push(serie[i]); }
+    }
+    return pearson(xs, ys);
+  }, [state, idxDia, serie]);
+
   if (!state) {
     return (<div className="fd"><style>{CSS}</style><div className="wrap top">
       <div className="eyebrow">Fundamento</div><div className="h1">Cargando bloque…</div></div></div>);
@@ -1548,6 +1613,13 @@ export default function Fundamento() {
   /* ------------------------------- DATOS ----------------------------- */
   const diasReg = serie.filter((v, i) => i <= idxDia && v > 0).length;
   const promedio = serie.slice(0, Math.min(idxDia + 1, 28)).reduce((a, b) => a + b, 0) / Math.max(1, Math.min(idxDia + 1, 28));
+  const pilaresOrdenados = [...PILARES].sort((a, b) => (porPilar[b.k] || 0) - (porPilar[a.k] || 0));
+  const pilarFuerte = pilaresOrdenados[0], pilarDebil = pilaresOrdenados[pilaresOrdenados.length - 1];
+
+  function empezarSiguienteCiclo() {
+    const d = parseISO(state.inicio); d.setDate(d.getDate() + 28);
+    guardar({ ...state, inicio: iso(d) });
+  }
 
   const vistaDatos = (
     <div className="wrap">
@@ -1555,6 +1627,17 @@ export default function Fundamento() {
         <div className="eyebrow">Sin drama, solo el marcador</div>
         <div className="h1">Datos<small>Se mide el proceso, no el resultado</small></div>
       </div>
+
+      {idxDia >= 27 && (
+        <div className="pane block cierre-pop" style={{ borderColor: "var(--ruta)" }}>
+          <span className="lbl">Cierre de ciclo · 28 días</span>
+          <h4 style={{ marginTop: 6 }}>Promedio del bloque: {Math.round(promedio * 100)}%</h4>
+          <p><b style={{ color: "var(--text)" }}>Lo que más sostuviste:</b> {pilarFuerte.n}, {Math.round((porPilar[pilarFuerte.k] || 0) * 100)}%.</p>
+          <p><b style={{ color: "var(--text)" }}>Lo que más costó:</b> {pilarDebil.n}, {Math.round((porPilar[pilarDebil.k] || 0) * 100)}%. Arranca el siguiente ciclo poniéndole atención ahí primero.</p>
+          <button className="btn solid" onClick={empezarSiguienteCiclo}>Empezar el siguiente ciclo</button>
+          <div className="note">Tu historial de este bloque no se borra: queda como referencia del "ciclo anterior" en el radar.</div>
+        </div>
+      )}
 
       <div className="pane chartwrap">
         <div className="charthead"><b>Perfil del bloque</b><span>{Math.round(promedio * 100)}%</span></div>
@@ -1564,15 +1647,43 @@ export default function Fundamento() {
       </div>
 
       <div className="grid2" style={{ marginTop: 9 }}>
-        <div className="pane stat"><b>{racha}</b><span>Días firmes seguidos</span></div>
+        <div className="pane stat"><b>{racha}</b><span>De los últimos 7 días, firmes</span></div>
         <div className="pane stat"><b>{diasReg}</b><span>Días registrados</span></div>
       </div>
 
       <div className="h3">Balance por frente</div>
       <div className="pane chartwrap">
-        <Radar valores={porPilar} />
-        <div className="note">Un pentágono parejo importa más que uno con una punta larga: el frente más corto es el que te va a frenar.</div>
+        <Radar valores={porPilar} comparar={porPilarAnterior} />
+        <div className="note">
+          Un pentágono parejo importa más que uno con una punta larga: el frente más corto es el que te va a frenar.
+          {porPilarAnterior && " La línea punteada es el ciclo de 28 días anterior (aproximado en Ruta, no se guarda el histórico exacto de sesiones)."}
+        </div>
       </div>
+
+      <div className="h3">Quién se cae primero</div>
+      <div className="pane block">
+        <table className="tbl">
+          <thead><tr><th>Semana</th>{PILARES.map((p) => <th key={p.k}>{p.n}</th>)}</tr></thead>
+          <tbody>
+            {adherenciaPorSemana.map((s) => (
+              <tr key={s.semana}>
+                <td>{s.semana}</td>
+                {PILARES.map((p) => <td key={p.k} style={{ color: s[p.k] == null ? "var(--dimmer)" : s[p.k] < 0.6 ? "var(--load-danger)" : "var(--text)" }}>
+                  {s[p.k] == null ? "—" : Math.round(s[p.k] * 100) + "%"}
+                </td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="note">El frente que primero baja de 60 % en una semana es el que se está cayendo — ese es el que necesita ajuste, no fuerza de voluntad.</div>
+      </div>
+
+      {correlacionSueno && (
+        <div className="pane block">
+          <h4>Observación exploratoria</h4>
+          <p>{frasePearson("horas de sueño", "adherencia del día", correlacionSueno)}</p>
+        </div>
+      )}
 
       <div className="h3">Los 28 días</div>
       <div className="pane block">
