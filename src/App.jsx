@@ -7,6 +7,8 @@ import {
 } from "./data/plan.js";
 import { bandaRuido } from "./engine/tendencia.js";
 import { cargaSesion } from "./engine/carga.js";
+import { importarActividad } from "./engine/importar.js";
+import ModoSesion from "./views/ModoSesion.jsx";
 
 /* ==========================================================================
    FUNDAMENTO · v2
@@ -645,6 +647,7 @@ export default function Fundamento() {
   const [alimentoNuevo, setAlimentoNuevo] = useState({ nombre: "", cat: "P", crudo0: "", crudo3: "" });
   const [semanaEditando, setSemanaEditando] = useState(1);
   const [mercadoCopiado, setMercadoCopiado] = useState(false);
+  const [modoSesion, setModoSesion] = useState(false);
   const [cap, setCap] = useState({ sab: "evitador", que: "", dijo: "", sabio: "" });
   const [chk, setChk] = useState({});
   const [aviso, setAviso] = useState("");
@@ -748,6 +751,64 @@ export default function Fundamento() {
   }
   const toggle = (id) => setDia({ done: { ...hechos, [id]: !hechos[id] } });
   const agua = (d) => setDia({ agua: Math.max(0, Math.round(((dd.agua || 0) + d) * 100) / 100) });
+
+  const registrarSerie = (nombreEjercicio, serie) => {
+    const actual = (dd.entreno && dd.entreno.ejercicios) || {};
+    const previas = (actual[nombreEjercicio] && actual[nombreEjercicio].series) || [];
+    setDia({
+      entreno: {
+        clave: plan.entreno.clave,
+        ejercicios: { ...actual, [nombreEjercicio]: { series: [...previas, serie] } },
+      },
+    });
+  };
+
+  const [importandoError, setImportandoError] = useState("");
+  function importarArchivo(archivo) {
+    setImportandoError("");
+    archivo.text().then((texto) => {
+      const resumen = importarActividad(texto);
+      if (!resumen) { setImportandoError("No reconocí el formato. Solo .gpx y .tcx por ahora."); return; }
+      setDia({ actividad: resumen });
+    }).catch(() => setImportandoError("No pude leer el archivo."));
+  }
+
+  // Últimas 6 salidas del mismo tipo de sesión (misma clave), con actividad importada,
+  // para la comparación "esto vs. tu histórico" — nunca contra otras personas.
+  const comparacionActividad = useMemo(() => {
+    if (!state || !dd.actividad) return null;
+    const previas = [];
+    Object.entries(state.dias).forEach(([f, reg]) => {
+      if (f >= fecha || !reg.actividad) return;
+      const idx = diffDias(state.inicio, f);
+      if (idx < 0 || idx > 27) return;
+      const semD = Math.floor(idx / 7) + 1, diaD = idx % 7;
+      const e = entrenoDe(semD, diaD, entrenoCfg, f);
+      if (e.clave === plan.entreno.clave) previas.push(reg.actividad);
+    });
+    const ultimas6 = previas.slice(-6);
+    if (!ultimas6.length) return null;
+    const media = (campo) => {
+      const vals = ultimas6.map((a) => a[campo]).filter((v) => v != null);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    };
+    return { n: ultimas6.length, distanciaKm: media("distanciaKm"), duracionMin: media("duracionMin"), fcMedia: media("fcMedia") };
+  }, [state, fecha, dd.actividad, entrenoCfg, plan.entreno.clave]);
+
+  // Historial de series por ejercicio, en días anteriores a hoy, para sugerir progresión.
+  const registroPrevio = useMemo(() => {
+    if (!state) return {};
+    const out = {};
+    Object.entries(state.dias).forEach(([f, reg]) => {
+      if (f >= fecha || !reg.entreno || !reg.entreno.ejercicios) return;
+      Object.entries(reg.entreno.ejercicios).forEach(([nombre, datos]) => {
+        if (!out[nombre]) out[nombre] = [];
+        out[nombre].push({ fecha: f, series: datos.series });
+      });
+    });
+    Object.values(out).forEach((lista) => lista.sort((a, b) => (a.fecha < b.fecha ? -1 : 1)));
+    return out;
+  }, [state, fecha]);
 
   function setEntreno(campos) {
     if (!state) return;
@@ -999,10 +1060,25 @@ export default function Fundamento() {
 
                     {p.k === "ruta" && (
                       <>
-                        {plan.entreno.lista.map((e, i) => (
-                          <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em>
-                            <span>{e[0]} — <span style={{ color: "var(--dim)" }}>{e[1]}</span></span></div>
-                        ))}
+                        {plan.entreno.tipo === "gym" && modoSesion ? (
+                          <ModoSesion
+                            ejercicios={plan.entreno.lista}
+                            registroPrevio={registroPrevio}
+                            seriesHoy={(dd.entreno && dd.entreno.ejercicios) || {}}
+                            onRegistrarSerie={registrarSerie}
+                            onSalir={() => setModoSesion(false)}
+                          />
+                        ) : (
+                          <>
+                            {plan.entreno.lista.map((e, i) => (
+                              <div className="li" key={i}><em>{String(i + 1).padStart(2, "0")}</em>
+                                <span>{e[0]} — <span style={{ color: "var(--dim)" }}>{e[1]}</span></span></div>
+                            ))}
+                            {plan.entreno.tipo === "gym" && (
+                              <button className="btn solid" onClick={() => setModoSesion(true)}>Empezar modo en sesión</button>
+                            )}
+                          </>
+                        )}
                         <span className="lbl">Cambiar solo hoy</span>
                         <select className="fld" aria-label="Cambiar el entreno solo de hoy" value={(entrenoCfg.overrides || {})[fecha] || ""} onChange={(e) => setOverrideHoy(e.target.value)}>
                           <option value="">Usar la plantilla ({SESION_LABEL[plantillaDeSemana(entrenoCfg, sem)[dia]]})</option>
@@ -1016,6 +1092,41 @@ export default function Fundamento() {
                             <span>{DIAS.reduce((a, _, i) => a + entrenoDe(sem, i, entrenoCfg, fechaDeSemDia(state.inicio, sem, i)).min, 0)} min</span></div>
                           <Carga sem={sem} hoyDia={dia} config={entrenoCfg} inicio={state.inicio} />
                         </div>
+
+                        {plan.entreno.tipo === "bici" && (
+                          <div style={{ marginTop: 14 }}>
+                            <span className="lbl">Importar salida (.gpx / .tcx)</span>
+                            <input className="fld" type="file" accept=".gpx,.tcx"
+                              onChange={(e) => { if (e.target.files[0]) importarArchivo(e.target.files[0]); }} />
+                            {importandoError && <div className="note" style={{ color: "var(--load-danger)" }}>{importandoError}</div>}
+                            {dd.actividad && (
+                              <div className="pane block" style={{ marginTop: 8 }}>
+                                <h4>Lo que hiciste hoy</h4>
+                                <div className="grid2">
+                                  <div className="stat"><b className="num">{dd.actividad.distanciaKm}</b><span>km</span></div>
+                                  <div className="stat"><b className="num">{dd.actividad.duracionMin ?? "—"}</b><span>minutos</span></div>
+                                  {dd.actividad.fcMedia != null && <div className="stat"><b className="num">{dd.actividad.fcMedia}</b><span>fc media</span></div>}
+                                  {dd.actividad.elevacionGanadaM > 0 && <div className="stat"><b className="num">{dd.actividad.elevacionGanadaM}</b><span>m de desnivel</span></div>}
+                                </div>
+                                {comparacionActividad ? (
+                                  <p style={{ marginTop: 10 }}>
+                                    Contra tus últimas {comparacionActividad.n} salidas de {SESION_LABEL[plan.entreno.clave]}:{" "}
+                                    {comparacionActividad.distanciaKm != null && (
+                                      dd.actividad.distanciaKm >= comparacionActividad.distanciaKm
+                                        ? `${Math.round((dd.actividad.distanciaKm / comparacionActividad.distanciaKm - 1) * 100)}% más distancia`
+                                        : `${Math.round((1 - dd.actividad.distanciaKm / comparacionActividad.distanciaKm) * 100)}% menos distancia`
+                                    )}
+                                    {comparacionActividad.fcMedia != null && dd.actividad.fcMedia != null && (
+                                      `, fc media ${dd.actividad.fcMedia >= comparacionActividad.fcMedia ? "más alta" : "más baja"} que tu promedio (${Math.round(comparacionActividad.fcMedia)}).`
+                                    )}
+                                  </p>
+                                ) : (
+                                  <p style={{ marginTop: 10 }}>Primera vez que importas una salida de {SESION_LABEL[plan.entreno.clave]} — desde la próxima, la comparo contra tu histórico.</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </>
                     )}
 
